@@ -2,14 +2,18 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use clap::Parser;
+use ed25519_dalek::SigningKey;
 use tracing::info;
 
 use algochat::{AlgoChat, AlgoChatConfig, AlgorandConfig, InMemoryKeyStorage, InMemoryMessageCache};
 
 mod agent;
 mod algorand;
+mod hub;
+mod transaction;
 
 use algorand::{HttpAlgodClient, HttpIndexerClient};
+use hub::HubClient;
 
 #[derive(Parser)]
 #[command(name = "nano", about = "Corvid Agent Nano — lightweight Rust agent")]
@@ -49,6 +53,10 @@ struct Cli {
     /// Poll interval in seconds
     #[arg(long, default_value = "5")]
     poll_interval: u64,
+
+    /// Skip hub registration (for offline/testing mode)
+    #[arg(long, default_value = "false")]
+    no_hub: bool,
 }
 
 #[tokio::main]
@@ -79,8 +87,11 @@ async fn main() -> Result<()> {
     let mut seed = [0u8; 32];
     seed.copy_from_slice(&seed_bytes);
 
+    // Derive the Ed25519 signing key (for transaction signing)
+    let signing_key = SigningKey::from_bytes(&seed);
+
     // Build Algorand clients
-    let algod = HttpAlgodClient::new(&cli.algod_url, &cli.algod_token);
+    let algod = Arc::new(HttpAlgodClient::new(&cli.algod_url, &cli.algod_token));
     let indexer = HttpIndexerClient::new(&cli.indexer_url, &cli.indexer_token);
 
     // Build AlgoChat config
@@ -93,7 +104,7 @@ async fn main() -> Result<()> {
         &seed,
         &cli.address,
         config,
-        algod,
+        HttpAlgodClient::new(&cli.algod_url, &cli.algod_token),
         indexer,
         InMemoryKeyStorage::new(),
         InMemoryMessageCache::new(),
@@ -110,16 +121,28 @@ async fn main() -> Result<()> {
 
     let client = Arc::new(client);
 
-    // Start the message polling loop in a background task
-    let loop_client = Arc::clone(&client);
+    // Register with hub (Flock Directory)
+    let mut hub = HubClient::new(&cli.hub_url);
+    if !cli.no_hub {
+        match hub.register(&cli.address, &cli.name, &pub_key).await {
+            Ok(id) => info!(agent_id = %id, "registered with hub"),
+            Err(e) => {
+                tracing::warn!(error = %e, "hub registration failed — running without hub");
+            }
+        }
+    }
+    let hub = Arc::new(hub);
+
+    // Start the message polling loop
     let loop_config = agent::AgentLoopConfig {
         poll_interval_secs: cli.poll_interval,
         hub_url: cli.hub_url.clone(),
         agent_name: cli.name.clone(),
+        address: cli.address.clone(),
     };
 
     let message_task = tokio::spawn(async move {
-        agent::run_message_loop(loop_client, loop_config).await;
+        agent::run_message_loop(client, algod, signing_key, hub, loop_config).await;
     });
 
     info!("nano agent ready — listening for AlgoChat messages");
