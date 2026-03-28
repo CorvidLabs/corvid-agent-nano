@@ -1,7 +1,7 @@
 ---
 module: plugin-sdk
 version: 1
-status: draft
+status: active
 files:
   - corvid-plugin-sdk/src/lib.rs
   - corvid-plugin-sdk/src/manifest.rs
@@ -84,25 +84,25 @@ This crate is the **semver stability boundary**. Breaking changes bump `ABI_VERS
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | `&'static str` | Plugin ID. Regex: `^[a-z][a-z0-9-]{0,49}$` |
-| `version` | `&'static str` | Semver version string |
-| `author` | `&'static str` | Author name or organization |
-| `description` | `&'static str` | Human-readable description |
-| `capabilities` | `&'static [Capability]` | Required capabilities — host rejects unknown capabilities |
-| `event_filter` | `&'static [EventKind]` | Events this plugin subscribes to |
+| `id` | `String` | Plugin ID. Regex: `^[a-z][a-z0-9-]{0,49}$` |
+| `version` | `String` | Semver version string |
+| `author` | `String` | Author name or organization |
+| `description` | `String` | Human-readable description |
+| `capabilities` | `Vec<Capability>` | Required capabilities — host rejects unknown capabilities |
+| `event_filter` | `Vec<EventKind>` | Events this plugin subscribes to |
 | `trust_tier` | `TrustTier` | Declared tier (hint — host assigns actual tier) |
-| `min_host_version` | `&'static str` | Minimum compatible host version (semver) |
+| `min_host_version` | `String` | Minimum compatible host version (semver) |
 
 ### Capability Variants
 
 | Variant | Fields | Description |
 |---------|--------|-------------|
-| `Network` | `allowlist: &'static [&'static str]` | Outbound HTTP to allowlisted domains |
-| `Storage` | `namespace: &'static str` | Scoped key-value storage |
+| `Network` | `allowlist: Vec<String>` | Outbound HTTP to allowlisted domains |
+| `Storage` | `namespace: String` | Scoped key-value storage |
 | `AlgoRead` | — | Read-only Algorand chain access |
 | `DbRead` | — | Read-only database access (SELECT only) |
 | `FsProjectDir` | — | Read-only filesystem access within project dir |
-| `AgentMessage` | `target_filter: &'static str` | Send messages to matching agents ("broadcast" or specific) |
+| `AgentMessage` | `target_filter: String` | Send messages to matching agents ("broadcast" or specific) |
 
 ### InitContext Fields
 
@@ -227,3 +227,4 @@ None — this is a library crate with no runtime configuration.
 | Date | Author | Change |
 |------|--------|--------|
 | 2026-03-28 | CorvidAgent | Initial spec from council synthesis (Issue #15) |
+| 2026-03-28 | CorvidAgent | Promoted to active — field types updated to match implementation (String/Vec vs static refs) |

@@ -1,7 +1,7 @@
 ---
 module: plugin-host
 version: 1
-status: draft
+status: active
 files:
   - corvid-plugin-host/src/main.rs
   - corvid-plugin-host/src/engine.rs
@@ -42,16 +42,16 @@ The Rust sidecar binary that hosts WASM plugins for corvid-agent. Runs as a sepa
 
 ### JSON-RPC Methods (Control Plane)
 
-| Method | Parameters | Returns | Description |
-|--------|-----------|---------|-------------|
-| `plugin.list` | `{}` | `PluginManifest[]` | List all loaded plugin manifests |
-| `plugin.load` | `{ path: string, tier: string }` | `{ ok: bool, error?: string }` | Load a WASM plugin from path |
-| `plugin.unload` | `{ id: string }` | `{ ok: bool }` | Gracefully unload a plugin (drain + shutdown) |
-| `plugin.reload` | `{ id: string, path: string }` | `{ ok: bool, error?: string }` | Hot-reload: drain → swap → activate |
-| `plugin.tools` | `{ id?: string }` | `ToolInfo[]` | List tools (all plugins or filtered by ID) |
-| `plugin.invoke` | `{ plugin_id: string, tool: string, input: Value }` | `{ result: string } \| { error: PluginError }` | Invoke a plugin tool |
-| `plugin.event` | `{ event: PluginEvent }` | `{ ok: bool }` | Dispatch event to subscribing plugins |
-| `health.check` | `{}` | `{ plugins: StatusMap, uptime_ms: u64 }` | Health status |
+| Method | Parameters | Returns | Status | Description |
+|--------|-----------|---------|--------|-------------|
+| `plugin.list` | `{}` | `PluginManifest[]` | **Implemented** | List all loaded plugin manifests |
+| `plugin.load` | `{ path: string, tier: string }` | `{ ok: bool, error?: string }` | **Implemented** | Load a WASM plugin from path |
+| `plugin.unload` | `{ id: string }` | `{ ok: bool }` | **Implemented** | Gracefully unload a plugin (drain + shutdown) |
+| `plugin.reload` | `{ id: string, path: string }` | `{ ok: bool, error?: string }` | **Implemented** | Hot-reload: drain → swap → activate |
+| `plugin.tools` | `{ id?: string }` | `ToolInfo[]` | **Stub** (returns `[]`) | List tools — requires WASM tool schema extraction |
+| `plugin.invoke` | `{ plugin_id: string, tool: string, input: Value }` | `{ result: string } \| { error: PluginError }` | **Planned** | Invoke a plugin tool — requires data plane |
+| `plugin.event` | `{ event: PluginEvent }` | `{ ok: bool }` | **Planned** | Dispatch event to subscribing plugins |
+| `health.check` | `{}` | `{ plugins: StatusMap, uptime_ms: u64 }` | **Implemented** | Health status |
 
 ### Exported Structs
 
@@ -82,9 +82,9 @@ Configures Wasmtime with AOT compilation cache. Cache directory defaults to `~/.
 
 Four-step load sequence, all before `init()`:
 
-1. **ABI check** — Extract `corvid_plugin_abi_version()`, verify within `[ABI_MIN_COMPATIBLE, ABI_VERSION]`
-2. **Signature verification** — Ed25519 on WASM binary (Trusted tier only)
-3. **Manifest extraction + validation** — ID regex, semver, min_host_version, capability audit, no duplicate tools
+1. **ABI check** — Extract `__corvid_abi_version()`, verify within `[ABI_MIN_COMPATIBLE, ABI_VERSION]`
+2. **Signature verification** — Ed25519 on WASM binary (Trusted tier only). **Note:** Currently a placeholder that logs a warning and accepts all Trusted plugins
+3. **Manifest extraction + validation** — ID regex, semver, min_host_version, capability audit
 4. **Instantiation** — Create Wasmtime instance with tier-appropriate limits
 
 ```rust
@@ -114,7 +114,7 @@ pub struct PluginSlot {
 
 ### executor.rs — Event Dispatch
 
-Routes `PluginEvent` to plugins whose `event_filter` matches the event kind. Respects `PluginSlot` state (skips draining/unloaded plugins).
+Routes `PluginEvent` to plugins whose `event_filter` matches the event kind. Respects `PluginSlot` state (skips draining/unloaded plugins). **Note:** Currently logs dispatch events but does not execute WASM event handlers — full WASM event calling is planned for the data plane integration.
 
 ### sandbox.rs — Security Sandboxing
 
@@ -166,17 +166,19 @@ Handles `plugin.list` and `plugin.tools` JSON-RPC methods. Returns manifest and 
 
 ### host_functions/ — Capability Implementations
 
-| File | Capability | Description |
-|------|-----------|-------------|
-| `messaging.rs` | `AgentMessage` | Send messages to agents matching `target_filter` |
-| `storage.rs` | `Storage` | Scoped key-value store per plugin namespace |
-| `algo.rs` | `AlgoRead` | Read Algorand application state, account info |
-| `http.rs` | `Network` | Allowlisted outbound HTTP with SSRF mitigation |
+Host function linking is implemented — capabilities are gated at instantiation time. The SSRF validation logic and storage backend architecture are in place. **Note:** The actual host function bodies are currently stubs returning `0`. Full implementations are planned for the data plane integration phase.
+
+| File | Capability | Status | Description |
+|------|-----------|--------|-------------|
+| `http.rs` | `Network` | **Stub** (URL validation implemented, request execution stubbed) | Allowlisted outbound HTTP with SSRF mitigation |
+| `storage.rs` | `Storage` | **Stub** (StorageBackend trait defined, KV ops stubbed) | Scoped key-value store per plugin namespace |
+| `algo.rs` | `AlgoRead` | **Stub** | Read Algorand application state, account info |
+| `messaging.rs` | `AgentMessage` | **Stub** | Send messages to agents matching `target_filter` |
 
 ## Invariants
 
 1. Plugin loading always follows the 4-step sequence: ABI check → signature → manifest → instantiation
-2. Unknown capabilities in a manifest cause a **hard load failure** — never silently dropped
+2. Unknown capabilities in a manifest should cause a **hard load failure** — currently silently ignored (logged at debug level); enforcement planned
 3. Host functions are linked at WASM instantiation time, not checked per-call
 4. `PluginSlot.drain_and_reload()` waits up to 30s for in-flight calls before swapping
 5. `scopeguard` on drain ensures state resets to `ACTIVE` even on `init()` failure
@@ -184,9 +186,9 @@ Handles `plugin.list` and `plugin.tools` JSON-RPC methods. Returns manifest and 
 7. Each plugin gets its own Wasmtime `Store` — no shared mutable state between plugins
 8. Per-plugin KV namespace isolation is enforced by construction (namespace prefix on all keys)
 9. AOT cache is keyed by `(wasm_hash, compiler_version, cpu_features)` — no stale cache hits
-10. Ed25519 signature verification happens BEFORE manifest extraction for Trusted tier
-11. SQL queries from `DbRead` capability are parsed and rejected if not SELECT-only
-12. Native plugin loading (dlopen) is only available with `--features dev-mode`, disabled in release builds
+10. Ed25519 signature verification happens BEFORE manifest extraction for Trusted tier — **currently a placeholder** accepting all Trusted plugins with a warning
+11. SQL queries from `DbRead` capability will be parsed and rejected if not SELECT-only — **not yet implemented** (no `db.rs` host function)
+12. Native plugin loading (dlopen) is planned for `--features dev-mode` — **not yet implemented**
 13. Panics in plugins are caught at the Wasmtime boundary — never propagate to the host process
 14. The socket path is `{data_dir}/plugins.sock` — configurable via `--data-dir`
 
@@ -281,3 +283,4 @@ Handles `plugin.list` and `plugin.tools` JSON-RPC methods. Returns manifest and 
 | Date | Author | Change |
 |------|--------|--------|
 | 2026-03-28 | CorvidAgent | Initial spec from council synthesis (Issue #15) |
+| 2026-03-28 | CorvidAgent | Promoted to active — added implementation status markers to RPC methods, host functions, and invariants. Documented stubs (tool discovery, invoke, event dispatch, host function bodies, Ed25519 verification) |

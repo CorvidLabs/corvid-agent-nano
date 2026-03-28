@@ -1,7 +1,7 @@
 ---
 module: plugin-macros
 version: 1
-status: draft
+status: active
 files:
   - corvid-plugin-macros/src/lib.rs
 depends_on:
@@ -21,6 +21,7 @@ Proc-macro crate (`proc-macro = true`) that generates WASM export glue for plugi
 | Macro | Kind | Description |
 |-------|------|-------------|
 | `#[corvid_plugin]` | Attribute macro | Applied to a struct that implements `CorvidPlugin`. Generates all WASM export functions |
+| `#[corvid_tool]` | Attribute macro | Applied to a struct to generate `PluginTool` trait implementation from annotations |
 
 ### Generated WASM Exports
 
@@ -28,12 +29,18 @@ When `#[corvid_plugin]` is applied to `struct MyPlugin`, the macro generates:
 
 | Export Function | Signature | Description |
 |----------------|-----------|-------------|
-| `corvid_plugin_abi_version` | `extern "C" fn() -> u32` | Returns `corvid_plugin_sdk::ABI_VERSION` |
-| `plugin_manifest_ptr` | `extern "C" fn() -> u32` | Serializes manifest to WASM linear memory, returns pointer |
-| `plugin_init` | `extern "C" fn(ctx_ptr: u32, ctx_len: u32) -> u32` | Deserializes `InitContext`, calls `init()`, serializes result |
-| `plugin_execute_tool` | `extern "C" fn(name_ptr: u32, name_len: u32, input_ptr: u32, input_len: u32) -> u32` | Routes to correct `PluginTool::execute()`, serializes result |
-| `plugin_on_event` | `extern "C" fn(event_ptr: u32, event_len: u32) -> u32` | Deserializes `PluginEvent`, calls `on_event()`, serializes result |
-| `plugin_shutdown` | `extern "C" fn()` | Calls `shutdown()` on the plugin instance |
+| `__corvid_abi_version` | `extern "C" fn() -> u32` | Returns `corvid_plugin_sdk::ABI_VERSION` |
+| `__corvid_manifest` | `extern "C" fn() -> i64` | Serializes manifest to MessagePack, returns packed `(ptr << 32 \| len)` |
+| `__corvid_init` | `extern "C" fn(ptr: i32, len: i32) -> i64` | Deserializes init payload `{ agent_id, host_version }`, calls `init()`, returns packed result |
+| `__corvid_tool_call` | `extern "C" fn(ptr: i32, len: i32) -> i64` | Deserializes `{ tool, input, session_id }`, routes to `PluginTool::execute()`, returns packed result |
+| `__corvid_handle_event` | `extern "C" fn(ptr: i32, len: i32) -> i64` | Deserializes `PluginEvent`, calls `on_event()`, returns packed result |
+| `__corvid_shutdown` | `extern "C" fn()` | Calls `shutdown()` on the plugin instance |
+| `__corvid_alloc` | `extern "C" fn(len: i32) -> i32` | WASM memory allocator for host→plugin data transfer |
+| `__corvid_dealloc` | `extern "C" fn(ptr: i32, len: i32)` | WASM memory deallocator for cleanup |
+
+### Return Value Encoding
+
+Functions that return data use **packed `i64`** encoding: `(pointer << 32) | length`. The upper 32 bits hold the pointer into WASM linear memory, and the lower 32 bits hold the byte length of the serialized data. This avoids multi-return or out-parameter patterns.
 
 ### Serialization Format
 
@@ -42,18 +49,27 @@ All data crossing the WASM boundary uses **MessagePack** (`rmp-serde`). The gene
 1. Reads input from WASM linear memory at `(ptr, len)`
 2. Deserializes MessagePack bytes into the appropriate Rust type
 3. Calls the trait method
-4. Serializes the result back to MessagePack
-5. Writes to WASM linear memory and returns the pointer
+4. Serializes the result to MessagePack as `Result<String, String>`
+5. Writes to WASM linear memory and returns the packed `i64` pointer/length
+
+### Payload Structures
+
+| Function | Input Payload | Output Payload |
+|----------|--------------|----------------|
+| `__corvid_init` | `{ agent_id: String, host_version: String }` | `Result<(), String>` |
+| `__corvid_tool_call` | `{ tool: String, input: Value, session_id: String }` | `Result<String, String>` |
+| `__corvid_handle_event` | `PluginEvent` (MessagePack) | `Result<(), String>` |
 
 ## Invariants
 
 1. The macro generates `#[no_mangle] pub extern "C"` functions only — no fat pointers, no vtables
 2. Exactly one `#[corvid_plugin]` annotation per WASM module (one plugin per `.wasm`)
-3. The macro creates a module-level `static` for the plugin instance (initialized in `plugin_init`)
-4. All generated functions use `catch_unwind` in dev-mode to catch panics at the boundary
-5. `corvid_plugin_abi_version()` always returns `corvid_plugin_sdk::ABI_VERSION` — never hardcoded
-6. Tool routing in `plugin_execute_tool` matches by tool name string — O(n) over tools list (acceptable; plugins have <20 tools)
-7. The macro must not add any runtime dependencies beyond `corvid-plugin-sdk` and `rmp-serde`
+3. The macro creates a module-level `static INSTANCE: Mutex<Option<T>>` for the plugin instance (initialized in `__corvid_init`)
+4. All export names use `__corvid_` prefix to avoid collisions with user code
+5. `__corvid_abi_version()` always returns `corvid_plugin_sdk::ABI_VERSION` — never hardcoded
+6. Tool routing in `__corvid_tool_call` matches by tool name string — O(n) over tools list (acceptable; plugins have <20 tools)
+7. The generated code depends on `corvid-plugin-sdk` and `rmp-serde` at compile time — the proc-macro crate itself only depends on `syn`, `quote`, `proc-macro2`
+8. Memory management (`__corvid_alloc`/`__corvid_dealloc`) is always generated to support host→plugin data transfer
 
 ## Behavioral Examples
 
@@ -61,19 +77,19 @@ All data crossing the WASM boundary uses **MessagePack** (`rmp-serde`). The gene
 
 - **Given** a struct `AlgoOraclePlugin` implementing `CorvidPlugin`
 - **When** `#[corvid_plugin]` is applied to the struct
-- **Then** six `extern "C"` functions are generated: `corvid_plugin_abi_version`, `plugin_manifest_ptr`, `plugin_init`, `plugin_execute_tool`, `plugin_on_event`, `plugin_shutdown`
+- **Then** eight `extern "C"` functions are generated: `__corvid_abi_version`, `__corvid_manifest`, `__corvid_init`, `__corvid_tool_call`, `__corvid_handle_event`, `__corvid_shutdown`, `__corvid_alloc`, `__corvid_dealloc`
 
 ### Scenario: Tool routing
 
 - **Given** a plugin with tools `["set_threshold", "fetch_app_state"]`
-- **When** `plugin_execute_tool` is called with `name = "set_threshold"`
+- **When** `__corvid_tool_call` is called with payload `{ tool: "set_threshold", input: {...}, session_id: "..." }`
 - **Then** the generated code finds the matching `PluginTool` by name and calls its `execute()`
 
 ### Scenario: Unknown tool name
 
 - **Given** a plugin with tools `["set_threshold"]`
-- **When** `plugin_execute_tool` is called with `name = "nonexistent"`
-- **Then** returns serialized `PluginError::BadInput("unknown tool: nonexistent")`
+- **When** `__corvid_tool_call` is called with `tool = "nonexistent"`
+- **Then** returns packed `i64` pointing to MessagePack-serialized `Err("unknown tool: nonexistent")`
 
 ## Error Cases
 
@@ -81,9 +97,8 @@ All data crossing the WASM boundary uses **MessagePack** (`rmp-serde`). The gene
 |-----------|----------|
 | Applied to an enum or union | Compile error: `#[corvid_plugin] can only be applied to structs` |
 | Struct does not implement `CorvidPlugin` | Standard Rust compile error (trait not implemented) |
-| Deserialization failure in generated code | Returns serialized `PluginError::BadInput` |
-| Panic in plugin method (dev-mode) | Caught by `catch_unwind`, returns `PluginError::Exec` |
-| Panic in plugin method (release) | WASM trap — caught at Wasmtime boundary in the host |
+| Deserialization failure in generated code | Returns serialized `Err(String)` via packed `i64` |
+| Panic in plugin method | WASM trap — caught at Wasmtime boundary in the host |
 
 ## Dependencies
 
@@ -111,3 +126,4 @@ None — this is a proc-macro crate with no runtime configuration.
 | Date | Author | Change |
 |------|--------|--------|
 | 2026-03-28 | CorvidAgent | Initial spec from council synthesis (Issue #15) |
+| 2026-03-28 | CorvidAgent | Promoted to active — updated export names (`__corvid_*`), signatures (`i64` packed returns), payload formats, added `#[corvid_tool]` macro, `__corvid_alloc`/`__corvid_dealloc`, removed unimplemented `catch_unwind` claim |
