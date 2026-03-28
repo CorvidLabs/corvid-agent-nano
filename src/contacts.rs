@@ -6,6 +6,15 @@ use std::sync::Mutex;
 use anyhow::{bail, Result};
 use rusqlite::Connection;
 
+/// Acquires the database mutex, converting a poison error into anyhow::Error.
+fn lock_db(
+    mutex: &Mutex<Connection>,
+) -> Result<std::sync::MutexGuard<'_, Connection>> {
+    mutex
+        .lock()
+        .map_err(|e| anyhow::anyhow!("Database lock poisoned: {e}"))
+}
+
 /// A PSK contact entry.
 #[derive(Debug, Clone)]
 pub struct Contact {
@@ -59,7 +68,7 @@ impl ContactStore {
         if psk.len() != 32 {
             bail!("PSK must be exactly 32 bytes (got {})", psk.len());
         }
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_db(&self.conn)?;
         conn.execute(
             "INSERT INTO contacts (name, address, psk) VALUES (?1, ?2, ?3)",
             rusqlite::params![name, address, psk],
@@ -82,7 +91,7 @@ impl ContactStore {
         if psk.len() != 32 {
             bail!("PSK must be exactly 32 bytes (got {})", psk.len());
         }
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_db(&self.conn)?;
         conn.execute(
             "INSERT OR REPLACE INTO contacts (name, address, psk) VALUES (?1, ?2, ?3)",
             rusqlite::params![name, address, psk],
@@ -92,14 +101,14 @@ impl ContactStore {
 
     /// Remove a contact by name.
     pub fn remove(&self, name: &str) -> Result<bool> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_db(&self.conn)?;
         let rows = conn.execute("DELETE FROM contacts WHERE name = ?1", [name])?;
         Ok(rows > 0)
     }
 
     /// List all contacts.
     pub fn list(&self) -> Result<Vec<Contact>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_db(&self.conn)?;
         let mut stmt =
             conn.prepare("SELECT name, address, psk, added_at FROM contacts ORDER BY name")?;
         let contacts = stmt
@@ -118,7 +127,7 @@ impl ContactStore {
     /// Get a contact by name.
     #[allow(dead_code)]
     pub fn get(&self, name: &str) -> Result<Option<Contact>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_db(&self.conn)?;
         let mut stmt =
             conn.prepare("SELECT name, address, psk, added_at FROM contacts WHERE name = ?1")?;
         let mut rows = stmt.query_map([name], |row| {
@@ -139,7 +148,7 @@ impl ContactStore {
     /// Get a contact by Algorand address.
     #[allow(dead_code)]
     pub fn get_by_address(&self, address: &str) -> Result<Option<Contact>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_db(&self.conn)?;
         let mut stmt =
             conn.prepare("SELECT name, address, psk, added_at FROM contacts WHERE address = ?1")?;
         let mut rows = stmt.query_map([address], |row| {
@@ -196,7 +205,7 @@ impl ContactStore {
 
     /// Count the number of contacts.
     pub fn count(&self) -> Result<usize> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_db(&self.conn)?;
         let count: i64 = conn.query_row("SELECT COUNT(*) FROM contacts", [], |row| row.get(0))?;
         Ok(count as usize)
     }
