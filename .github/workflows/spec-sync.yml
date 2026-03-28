@@ -1,0 +1,19 @@
+name: Spec Sync
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  spec-sync:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Spec validation (strict + 100% coverage)
+        uses: CorvidLabs/spec-sync@v2.1.0
+        with:
+          strict: 'true'
+          require-coverage: '100'
