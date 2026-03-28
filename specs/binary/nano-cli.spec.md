@@ -1,6 +1,6 @@
 ---
 module: nano-cli
-version: 2
+version: 3
 status: active
 files:
   - src/main.rs
@@ -67,15 +67,30 @@ Binary entry point for corvid-agent-nano. Parses CLI arguments, initializes cryp
 | `get_transaction` | `GET /v2/transactions/{txid}` | Fetch a specific transaction by ID |
 | `wait_for_indexer` | (polls `get_transaction`) | Poll until indexed or timeout |
 
-### agent.rs — Message Loop
+### agent.rs — Message Loop & Hub Forwarding
 
 | Function | Parameters | Description |
 |----------|-----------|-------------|
-| `run_message_loop` | `Arc<AlgoChat<...>>`, `AgentLoopConfig` | Infinite loop: sync → process new messages → sleep → repeat |
+| `run_message_loop` | `Arc<AlgoChat<...>>`, `AgentLoopConfig` | Infinite loop: sync → forward to hub → sleep → repeat |
+| `forward_to_hub` | `&Client`, hub_url, sender, content | POST message to hub's A2A task endpoint (fire-and-forget) |
 
 | Struct | Description |
 |--------|-------------|
 | `AgentLoopConfig` | `poll_interval_secs`, `hub_url`, `agent_name` |
+| `HubTaskRequest` | JSON payload: `message` (String), `timeoutMs` (u64) |
+| `HubTaskResponse` | JSON response: `id` (String), `state` (String) |
+
+#### Hub Forwarding Protocol
+
+Messages are forwarded to `POST {hub_url}/a2a/tasks/send` with payload:
+```json
+{
+  "message": "[AlgoChat from SENDER_ADDRESS] MESSAGE_CONTENT",
+  "timeoutMs": 300000
+}
+```
+
+Forwarding is fire-and-forget: the agent logs the task ID but does not poll for completion. If the hub is unreachable, a warning is logged and the agent continues polling.
 
 ## Invariants
 
@@ -96,11 +111,17 @@ Binary entry point for corvid-agent-nano. Parses CLI arguments, initializes cryp
 - **When** the binary starts
 - **Then** it derives X25519 keys from the seed, logs the encryption public key, and starts polling for messages
 
-### Scenario: Message received
+### Scenario: Message received and forwarded
 
 - **Given** the agent is running and an AlgoChat-encrypted message arrives on-chain
 - **When** the sync loop picks up the transaction
-- **Then** it decrypts the message and logs sender, recipient, round, and content (truncated to 100 chars)
+- **Then** it decrypts the message, logs sender/recipient/round/content (truncated to 100 chars), and forwards to the hub via `POST /a2a/tasks/send`
+
+### Scenario: Hub unreachable during forwarding
+
+- **Given** the agent receives a valid message but the hub is down
+- **When** forwarding is attempted
+- **Then** it logs a warning and continues the polling loop (does not crash or block)
 
 ### Scenario: Indexer unreachable
 
@@ -123,6 +144,8 @@ Binary entry point for corvid-agent-nano. Parses CLI arguments, initializes cryp
 | Missing `--seed` or `--address` | clap prints help/error and exits with code 2 |
 | Algorand node unreachable | sync loop logs warning and retries next interval |
 | AlgoChat decryption failure | Message skipped, error logged |
+| Hub API unreachable | Warning logged, loop continues |
+| Hub returns non-2xx | Warning logged with status code, loop continues |
 
 ## Dependencies
 
@@ -149,3 +172,4 @@ None — this is the binary entry point.
 |------|--------|--------|
 | 2026-03-28 | CorvidAgent | Initial spec — CLI skeleton with logging and graceful shutdown |
 | 2026-03-28 | CorvidAgent | v2: Full implementation — HTTP Algorand clients, AlgoChat identity, message loop |
+| 2026-03-28 | CorvidAgent | v3: Hub forwarding — messages forwarded to A2A tasks/send endpoint, unit tests added |
