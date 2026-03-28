@@ -1,7 +1,7 @@
 ---
 module: plugin-bridge
 version: 1
-status: draft
+status: active
 files:
   - server/plugins/rust-bridge.ts
   - server/routes/plugins.ts
