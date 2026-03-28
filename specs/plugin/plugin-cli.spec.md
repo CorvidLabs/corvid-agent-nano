@@ -1,7 +1,7 @@
 ---
 module: plugin-cli
 version: 1
-status: draft
+status: active
 files:
   - corvid-plugin-cli/src/main.rs
   - corvid-plugin-cli/src/scaffold.rs
@@ -196,3 +196,4 @@ CREATE TABLE plugins (
 | Date | Author | Change |
 |------|--------|--------|
 | 2026-03-28 | CorvidAgent | Initial spec from council synthesis (Issue #15) |
+| 2026-03-28 | CorvidAgent | v2: Implemented — scaffold, validate, install, list, uninstall subcommands |
