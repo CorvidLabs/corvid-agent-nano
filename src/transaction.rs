@@ -130,19 +130,16 @@ fn sign_transaction(raw_txn: &[u8], signing_key: &SigningKey) -> anyhow::Result<
 // ---- msgpack helpers ----
 
 fn write_str(buf: &mut Vec<u8>, s: &str) -> anyhow::Result<()> {
-    rmp::encode::write_str(buf, s)
-        .map_err(|e| anyhow::anyhow!("msgpack encode error: {}", e))
+    rmp::encode::write_str(buf, s).map_err(|e| anyhow::anyhow!("msgpack encode error: {}", e))
 }
 
 fn write_uint(buf: &mut Vec<u8>, v: u64) -> anyhow::Result<()> {
-    rmp::encode::write_uint(buf, v)
-        .map_err(|e| anyhow::anyhow!("msgpack encode error: {}", e))?;
+    rmp::encode::write_uint(buf, v).map_err(|e| anyhow::anyhow!("msgpack encode error: {}", e))?;
     Ok(())
 }
 
 fn write_bin(buf: &mut Vec<u8>, data: &[u8]) -> anyhow::Result<()> {
-    rmp::encode::write_bin(buf, data)
-        .map_err(|e| anyhow::anyhow!("msgpack encode error: {}", e))
+    rmp::encode::write_bin(buf, data).map_err(|e| anyhow::anyhow!("msgpack encode error: {}", e))
 }
 
 /// Decode an Algorand address (base32 with 4-byte checksum) to 32 raw bytes.
