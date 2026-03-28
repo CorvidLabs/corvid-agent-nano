@@ -1,7 +1,8 @@
+use std::fmt;
 use std::sync::Arc;
 
 use anyhow::Result;
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use ed25519_dalek::SigningKey;
 use tracing::info;
 
@@ -14,30 +15,82 @@ mod transaction;
 
 use algorand::{HttpAlgodClient, HttpIndexerClient};
 
+/// Algorand network presets.
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum Network {
+    /// Local sandbox (default) — localhost:4001/8980
+    Localnet,
+    /// Algorand TestNet via Algonode public API
+    Testnet,
+    /// Algorand MainNet via Algonode public API
+    Mainnet,
+}
+
+impl fmt::Display for Network {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Network::Localnet => write!(f, "localnet"),
+            Network::Testnet => write!(f, "testnet"),
+            Network::Mainnet => write!(f, "mainnet"),
+        }
+    }
+}
+
+/// Resolved URLs and tokens for an Algorand network.
+struct NetworkConfig {
+    algod_url: String,
+    algod_token: String,
+    indexer_url: String,
+    indexer_token: String,
+}
+
+impl Network {
+    fn defaults(self) -> NetworkConfig {
+        match self {
+            Network::Localnet => NetworkConfig {
+                algod_url: "http://localhost:4001".into(),
+                algod_token: "a".repeat(64),
+                indexer_url: "http://localhost:8980".into(),
+                indexer_token: "a".repeat(64),
+            },
+            Network::Testnet => NetworkConfig {
+                algod_url: "https://testnet-api.4160.nodely.dev".into(),
+                algod_token: String::new(),
+                indexer_url: "https://testnet-idx.4160.nodely.dev".into(),
+                indexer_token: String::new(),
+            },
+            Network::Mainnet => NetworkConfig {
+                algod_url: "https://mainnet-api.4160.nodely.dev".into(),
+                algod_token: String::new(),
+                indexer_url: "https://mainnet-idx.4160.nodely.dev".into(),
+                indexer_token: String::new(),
+            },
+        }
+    }
+}
+
 #[derive(Parser)]
 #[command(name = "nano", about = "Corvid Agent Nano — lightweight Rust agent")]
 struct Cli {
-    /// Algorand node URL (default: localnet)
-    #[arg(long, default_value = "http://localhost:4001")]
-    algod_url: String,
+    /// Algorand network preset (localnet, testnet, mainnet)
+    #[arg(long, default_value = "localnet", env = "NANO_NETWORK")]
+    network: Network,
 
-    /// Algorand node token
-    #[arg(
-        long,
-        default_value = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    )]
-    algod_token: String,
+    /// Override: Algorand node URL
+    #[arg(long, env = "NANO_ALGOD_URL")]
+    algod_url: Option<String>,
 
-    /// Algorand indexer URL
-    #[arg(long, default_value = "http://localhost:8980")]
-    indexer_url: String,
+    /// Override: Algorand node token
+    #[arg(long, env = "NANO_ALGOD_TOKEN")]
+    algod_token: Option<String>,
 
-    /// Algorand indexer token
-    #[arg(
-        long,
-        default_value = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    )]
-    indexer_token: String,
+    /// Override: Algorand indexer URL
+    #[arg(long, env = "NANO_INDEXER_URL")]
+    indexer_url: Option<String>,
+
+    /// Override: Algorand indexer token
+    #[arg(long, env = "NANO_INDEXER_TOKEN")]
+    indexer_token: Option<String>,
 
     /// Agent seed (hex-encoded 32-byte Ed25519 private key)
     #[arg(long, env = "NANO_SEED")]
@@ -74,10 +127,18 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
+    // Resolve network config: preset defaults + CLI overrides
+    let net = cli.network.defaults();
+    let algod_url = cli.algod_url.unwrap_or(net.algod_url);
+    let algod_token = cli.algod_token.unwrap_or(net.algod_token);
+    let indexer_url = cli.indexer_url.unwrap_or(net.indexer_url);
+    let indexer_token = cli.indexer_token.unwrap_or(net.indexer_token);
+
     info!(
         name = %cli.name,
-        algod = %cli.algod_url,
-        indexer = %cli.indexer_url,
+        network = %cli.network,
+        algod = %algod_url,
+        indexer = %indexer_url,
         hub = %cli.hub_url,
         "starting corvid-agent-nano"
     );
@@ -102,12 +163,12 @@ async fn main() -> Result<()> {
     std::fs::create_dir_all(data_dir)?;
 
     // Build Algorand clients
-    let algod = HttpAlgodClient::new(&cli.algod_url, &cli.algod_token);
-    let indexer = HttpIndexerClient::new(&cli.indexer_url, &cli.indexer_token);
+    let algod = HttpAlgodClient::new(&algod_url, &algod_token);
+    let indexer = HttpIndexerClient::new(&indexer_url, &indexer_token);
 
     // Build AlgoChat config
-    let network = AlgorandConfig::new(&cli.algod_url, &cli.algod_token)
-        .with_indexer(&cli.indexer_url, &cli.indexer_token);
+    let network =
+        AlgorandConfig::new(&algod_url, &algod_token).with_indexer(&indexer_url, &indexer_token);
     let config = AlgoChatConfig::new(network);
 
     // Initialize persistent SQLite storage
@@ -142,7 +203,7 @@ async fn main() -> Result<()> {
 
     // Build a separate algod client for transaction submission (the first one
     // was moved into AlgoChat). This is cheap — just wraps a reqwest::Client.
-    let algod_for_tx = Arc::new(HttpAlgodClient::new(&cli.algod_url, &cli.algod_token));
+    let algod_for_tx = Arc::new(HttpAlgodClient::new(&algod_url, &algod_token));
 
     // Start the message polling loop in a background task
     let loop_client = Arc::clone(&client);
