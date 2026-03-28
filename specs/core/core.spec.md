@@ -8,9 +8,7 @@ files:
   - crates/core/src/message.rs
   - crates/core/src/config.rs
   - crates/core/src/storage.rs
-depends_on:
-  - external: algochat (git: https://github.com/CorvidLabs/rs-algochat)
-  - external: rusqlite 0.31 (bundled)
+depends_on: []
 ---
 
 # Core Types

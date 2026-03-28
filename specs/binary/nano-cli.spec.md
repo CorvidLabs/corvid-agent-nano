@@ -8,7 +8,6 @@ files:
   - src/algorand.rs
 depends_on:
   - specs/core/core.spec.md
-  - external: algochat (git: https://github.com/CorvidLabs/rs-algochat)
 ---
 
 # Nano CLI
