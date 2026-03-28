@@ -85,8 +85,8 @@ Shared types and data structures used across all corvid-agent-nano crates. Provi
 
 | Method | Description |
 |--------|-------------|
-| `open(path)` | Open or create a SQLite database at the given file path |
-| `in_memory()` | Create an in-memory database (for testing) |
+| `open` | Open or create a SQLite database at the given file path |
+| `in_memory` | Create an in-memory database (for testing) |
 | `store(key, address, _biometric)` | Store a 32-byte private key for an address (INSERT OR REPLACE) |
 | `retrieve(address)` | Retrieve a private key, returns `KeyNotFound` if missing |
 | `has_key(address)` | Check if a key exists for an address |
@@ -97,8 +97,8 @@ Shared types and data structures used across all corvid-agent-nano crates. Provi
 
 | Method | Description |
 |--------|-------------|
-| `open(path)` | Open or create a SQLite database at the given file path |
-| `in_memory()` | Create an in-memory database (for testing) |
+| `open` | Open or create a SQLite database at the given file path |
+| `in_memory` | Create an in-memory database (for testing) |
 | `store(messages, participant)` | Store messages, deduplicating by message ID (INSERT OR IGNORE) |
 | `retrieve(participant, after_round)` | Retrieve messages, optionally filtering by confirmed_round |
 | `get_last_sync_round(participant)` | Get the last synced Algorand round for a conversation |

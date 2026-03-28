@@ -64,6 +64,13 @@ Binary entry point for corvid-agent-nano. Parses CLI arguments, initializes cryp
 | `HttpAlgodClient` | `algochat::AlgodClient` | HTTP client for algod v2 REST API |
 | `HttpIndexerClient` | `algochat::IndexerClient` | HTTP client for indexer v2 REST API |
 
+#### Constructors
+
+| Method | Parameters | Description |
+|--------|-----------|-------------|
+| `HttpAlgodClient::new` | `base_url: &str`, `token: &str` | Create a new HTTP algod client with the given URL and API token |
+| `HttpIndexerClient::new` | `base_url: &str`, `token: &str` | Create a new HTTP indexer client with the given URL and API token |
+
 #### HttpAlgodClient Endpoints
 
 | Method | Endpoint | Description |
