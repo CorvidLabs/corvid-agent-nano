@@ -1,6 +1,6 @@
 ---
 module: core
-version: 2
+version: 3
 status: active
 files:
   - crates/core/src/lib.rs
@@ -19,6 +19,15 @@ Shared types and data structures used across all corvid-agent-nano crates. Provi
 
 ## Public API
 
+### Exported Modules
+
+| Module | Description |
+|--------|-------------|
+| `agent` | Agent identity type |
+| `config` | Runtime configuration type |
+| `message` | Message type |
+| `storage` | SQLite-backed persistent storage implementations |
+
 ### Exported Structs
 
 | Struct | Description |
@@ -26,6 +35,17 @@ Shared types and data structures used across all corvid-agent-nano crates. Provi
 | `AgentIdentity` | An agent's on-chain identity: Algorand address, name, X25519 public key, and capabilities |
 | `Message` | A decrypted AlgoChat message with sender, recipient, content, timestamp, and optional txid |
 | `NanoConfig` | Runtime configuration: Algorand node URL/token, agent name, hub URL, data directory |
+| `SqliteKeyStorage` | Persistent X25519 private key storage backed by SQLite |
+| `SqliteMessageCache` | Persistent message cache and sync-round bookmarks backed by SQLite |
+
+### Exported Functions
+
+| Function | Parameters | Returns | Description |
+|----------|-----------|---------|-------------|
+| `SqliteKeyStorage::open` | `path: impl AsRef<Path>` | `algochat::Result<Self>` | Open or create a SQLite database at the given file path |
+| `SqliteKeyStorage::in_memory` | — | `algochat::Result<Self>` | Create an in-memory database (for testing) |
+| `SqliteMessageCache::open` | `path: impl AsRef<Path>` | `algochat::Result<Self>` | Open or create a SQLite database at the given file path |
+| `SqliteMessageCache::in_memory` | — | `algochat::Result<Self>` | Create an in-memory database (for testing) |
 
 ### AgentIdentity Fields
 
@@ -196,3 +216,4 @@ Shared types and data structures used across all corvid-agent-nano crates. Provi
 | 2026-03-28 | CorvidAgent | Initial spec |
 | 2026-03-28 | CorvidAgent | Replace local crypto/algochat crates with external rs-algochat dependency |
 | 2026-03-28 | CorvidAgent | Add SQLite storage module: SqliteKeyStorage + SqliteMessageCache with 16 tests |
+| 2026-03-28 | CorvidAgent | Add Exported Modules/Functions sections for spec-sync strict compliance |

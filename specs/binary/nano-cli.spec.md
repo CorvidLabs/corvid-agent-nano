@@ -1,6 +1,6 @@
 ---
 module: nano-cli
-version: 4
+version: 5
 status: active
 files:
   - src/main.rs
@@ -17,6 +17,23 @@ depends_on:
 Binary entry point for corvid-agent-nano. Parses CLI arguments, initializes crypto identity from an Ed25519 seed, creates HTTP-based Algorand clients, starts the AlgoChat message polling loop, and runs until Ctrl+C. Provides a single-binary, instant-startup agent that connects to the corvid-agent ecosystem via the AlgoChat protocol on Algorand.
 
 ## Public API
+
+### Exported Structs
+
+| Struct | Description |
+|--------|-------------|
+| `AgentLoopConfig` | Configuration for the message polling loop: poll interval, hub URL, agent name |
+| `HttpAlgodClient` | HTTP adapter implementing `algochat::AlgodClient` for algod v2 REST API |
+| `HttpIndexerClient` | HTTP adapter implementing `algochat::IndexerClient` for indexer v2 REST API |
+
+### Exported Functions
+
+| Function | Parameters | Returns | Description |
+|----------|-----------|---------|-------------|
+| `run_message_loop` | `Arc<AlgoChat<...>>`, `AgentLoopConfig` | `!` | Infinite loop: sync → forward to hub → sleep → repeat |
+| `HttpAlgodClient::new` | `base_url: &str`, `token: &str` | `Self` | Create a new HTTP algod client |
+| `HttpIndexerClient::new` | `base_url: &str`, `token: &str` | `Self` | Create a new HTTP indexer client |
+| `decode` | `s: &str` | `Result<Vec<u8>, DecodeError>` | Decode a base64 string to bytes |
 
 ### CLI Arguments (clap)
 
@@ -176,3 +193,4 @@ None — this is the binary entry point.
 | 2026-03-28 | CorvidAgent | v2: Full implementation — HTTP Algorand clients, AlgoChat identity, message loop |
 | 2026-03-28 | CorvidAgent | v3: Hub forwarding — messages forwarded to A2A tasks/send endpoint, unit tests added |
 | 2026-03-28 | CorvidAgent | v4: SQLite persistence — replace in-memory storage with SqliteKeyStorage/SqliteMessageCache, add --data-dir flag |
+| 2026-03-28 | CorvidAgent | v5: Add Exported Structs/Functions sections for spec-sync strict compliance |
