@@ -31,8 +31,7 @@ Binary entry point for corvid-agent-nano. Parses CLI arguments, initializes cryp
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
 | `run_message_loop` | `Arc<AlgoChat<...>>`, `AgentLoopConfig` | `!` | Infinite loop: sync → forward to hub → sleep → repeat |
-| `HttpAlgodClient::new` | `base_url: &str`, `token: &str` | `Self` | Create a new HTTP algod client |
-| `HttpIndexerClient::new` | `base_url: &str`, `token: &str` | `Self` | Create a new HTTP indexer client |
+| `new` | `base_url: &str`, `token: &str` | `Self` | Constructor for `HttpAlgodClient` and `HttpIndexerClient` |
 | `decode` | `s: &str` | `Result<Vec<u8>, DecodeError>` | Decode a base64 string to bytes |
 
 ### CLI Arguments (clap)

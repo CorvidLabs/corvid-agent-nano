@@ -42,10 +42,8 @@ Shared types and data structures used across all corvid-agent-nano crates. Provi
 
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
-| `SqliteKeyStorage::open` | `path: impl AsRef<Path>` | `algochat::Result<Self>` | Open or create a SQLite database at the given file path |
-| `SqliteKeyStorage::in_memory` | — | `algochat::Result<Self>` | Create an in-memory database (for testing) |
-| `SqliteMessageCache::open` | `path: impl AsRef<Path>` | `algochat::Result<Self>` | Open or create a SQLite database at the given file path |
-| `SqliteMessageCache::in_memory` | — | `algochat::Result<Self>` | Create an in-memory database (for testing) |
+| `open` | `path: impl AsRef<Path>` | `algochat::Result<Self>` | Open or create a SQLite database at the given file path (on both `SqliteKeyStorage` and `SqliteMessageCache`) |
+| `in_memory` | — | `algochat::Result<Self>` | Create an in-memory database for testing (on both `SqliteKeyStorage` and `SqliteMessageCache`) |
 
 ### AgentIdentity Fields
 
