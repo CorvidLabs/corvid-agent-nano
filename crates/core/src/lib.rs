@@ -3,6 +3,7 @@
 pub mod agent;
 pub mod config;
 pub mod message;
+pub mod storage;
 
 pub use agent::AgentIdentity;
 pub use message::Message;

@@ -4,9 +4,8 @@ use anyhow::Result;
 use clap::Parser;
 use tracing::info;
 
-use algochat::{
-    AlgoChat, AlgoChatConfig, AlgorandConfig, InMemoryKeyStorage, InMemoryMessageCache,
-};
+use algochat::{AlgoChat, AlgoChatConfig, AlgorandConfig};
+use corvid_core::storage::{SqliteKeyStorage, SqliteMessageCache};
 
 mod agent;
 mod algorand;
@@ -54,6 +53,10 @@ struct Cli {
     #[arg(long, default_value = "http://localhost:3578")]
     hub_url: String,
 
+    /// Data directory for persistent storage
+    #[arg(long, default_value = "./data")]
+    data_dir: String,
+
     /// Poll interval in seconds
     #[arg(long, default_value = "5")]
     poll_interval: u64,
@@ -89,6 +92,10 @@ async fn main() -> Result<()> {
     let mut seed = [0u8; 32];
     seed.copy_from_slice(&seed_bytes);
 
+    // Ensure data directory exists
+    let data_dir = std::path::Path::new(&cli.data_dir);
+    std::fs::create_dir_all(data_dir)?;
+
     // Build Algorand clients
     let algod = HttpAlgodClient::new(&cli.algod_url, &cli.algod_token);
     let indexer = HttpIndexerClient::new(&cli.indexer_url, &cli.indexer_token);
@@ -98,6 +105,14 @@ async fn main() -> Result<()> {
         .with_indexer(&cli.indexer_url, &cli.indexer_token);
     let config = AlgoChatConfig::new(network);
 
+    // Initialize persistent SQLite storage
+    let key_storage = SqliteKeyStorage::open(data_dir.join("keys.db"))
+        .map_err(|e| anyhow::anyhow!("Failed to open key storage: {}", e))?;
+    let message_cache = SqliteMessageCache::open(data_dir.join("messages.db"))
+        .map_err(|e| anyhow::anyhow!("Failed to open message cache: {}", e))?;
+
+    info!(data_dir = %cli.data_dir, "persistent storage initialized");
+
     // Initialize AlgoChat client
     let client = AlgoChat::from_seed(
         &seed,
@@ -105,8 +120,8 @@ async fn main() -> Result<()> {
         config,
         algod,
         indexer,
-        InMemoryKeyStorage::new(),
-        InMemoryMessageCache::new(),
+        key_storage,
+        message_cache,
     )
     .await
     .map_err(|e| anyhow::anyhow!("Failed to initialize AlgoChat: {}", e))?;
