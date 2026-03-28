@@ -22,6 +22,10 @@ algochat = { git = "https://github.com/CorvidLabs/rs-algochat", tag = "v0.2.1" }
 hex = "0.4"
 data-encoding = "2"
 async-trait = "0.1"
+ed25519-dalek = { version = "2", features = ["std"] }
+sha2 = "0.10"
+rmp = "0.8"
+rmp-serde = "1"
 
 [package]
 name = "corvid-agent-nano"
@@ -46,3 +50,7 @@ reqwest.workspace = true
 hex.workspace = true
 data-encoding.workspace = true
 async-trait.workspace = true
+ed25519-dalek.workspace = true
+sha2.workspace = true
+rmp.workspace = true
+rmp-serde.workspace = true

@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use clap::Parser;
+use ed25519_dalek::SigningKey;
 use tracing::info;
 
 use algochat::{AlgoChat, AlgoChatConfig, AlgorandConfig};
@@ -9,6 +10,7 @@ use corvid_core::storage::{SqliteKeyStorage, SqliteMessageCache};
 
 mod agent;
 mod algorand;
+mod transaction;
 
 use algorand::{HttpAlgodClient, HttpIndexerClient};
 
@@ -92,6 +94,9 @@ async fn main() -> Result<()> {
     let mut seed = [0u8; 32];
     seed.copy_from_slice(&seed_bytes);
 
+    // Derive Ed25519 signing key from seed
+    let signing_key = SigningKey::from_bytes(&seed);
+
     // Ensure data directory exists
     let data_dir = std::path::Path::new(&cli.data_dir);
     std::fs::create_dir_all(data_dir)?;
@@ -135,16 +140,23 @@ async fn main() -> Result<()> {
 
     let client = Arc::new(client);
 
+    // Build a separate algod client for transaction submission (the first one
+    // was moved into AlgoChat). This is cheap — just wraps a reqwest::Client.
+    let algod_for_tx = Arc::new(HttpAlgodClient::new(&cli.algod_url, &cli.algod_token));
+
     // Start the message polling loop in a background task
     let loop_client = Arc::clone(&client);
+    let loop_algod = Arc::clone(&algod_for_tx);
     let loop_config = agent::AgentLoopConfig {
         poll_interval_secs: cli.poll_interval,
         hub_url: cli.hub_url.clone(),
         agent_name: cli.name.clone(),
+        agent_address: cli.address.clone(),
+        signing_key,
     };
 
     let message_task = tokio::spawn(async move {
-        agent::run_message_loop(loop_client, loop_config).await;
+        agent::run_message_loop(loop_client, loop_algod, loop_config).await;
     });
 
     info!("nano agent ready — listening for AlgoChat messages");
