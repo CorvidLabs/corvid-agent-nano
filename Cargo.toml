@@ -27,6 +27,13 @@ rmpv = { version = "1", features = ["with-serde"] }
 sha2 = "0.10"
 ed25519-dalek = "2"
 serde_bytes = "0.11"
+argon2 = "0.5"
+chacha20poly1305 = "0.10"
+zeroize = { version = "1", features = ["derive"] }
+rand = "0.9"
+rpassword = "7"
+dirs = "6"
+tempfile = "3"
 
 [package]
 name = "corvid-agent-nano"
@@ -34,7 +41,7 @@ version.workspace = true
 edition.workspace = true
 
 [[bin]]
-name = "nano"
+name = "can"
 path = "src/main.rs"
 
 [dependencies]
@@ -56,3 +63,12 @@ rmpv.workspace = true
 sha2.workspace = true
 ed25519-dalek.workspace = true
 serde_bytes.workspace = true
+argon2.workspace = true
+chacha20poly1305.workspace = true
+zeroize.workspace = true
+rand.workspace = true
+rpassword.workspace = true
+dirs.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
