@@ -26,6 +26,14 @@ ed25519-dalek = { version = "2", features = ["std"] }
 sha2 = "0.10"
 rmp = "0.8"
 rmp-serde = "1"
+rand = "0.8"
+argon2 = "0.5"
+chacha20poly1305 = "0.10"
+rpassword = "7"
+dialoguer = "0.11"
+zeroize = { version = "1", features = ["derive"] }
+base64 = "0.22"
+chrono = "0.4"
 
 [package]
 name = "corvid-agent-nano"
@@ -54,3 +62,15 @@ ed25519-dalek.workspace = true
 sha2.workspace = true
 rmp.workspace = true
 rmp-serde.workspace = true
+rand.workspace = true
+argon2.workspace = true
+chacha20poly1305.workspace = true
+rpassword.workspace = true
+dialoguer.workspace = true
+zeroize.workspace = true
+base64.workspace = true
+chrono.workspace = true
+rusqlite.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
