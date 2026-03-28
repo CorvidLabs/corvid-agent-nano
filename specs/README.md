@@ -87,10 +87,16 @@ specs/
   _template.spec.md                — Copy-paste template
   core/
     core.spec.md                   — Shared types (AgentIdentity, Message, NanoConfig)
-  crypto/
-    crypto.spec.md                 — X25519 keypair + ChaCha20-Poly1305 encryption
-  algochat/
-    algochat.spec.md               — AlgoChat protocol client + listener
   binary/
-    nano-cli.spec.md               — CLI binary entry point
+    nano-cli.spec.md               — CAN CLI binary entry point (subcommands, dispatch)
+  vault/
+    vault.spec.md                  — Encrypted vault (Argon2id + ChaCha20-Poly1305)
+  identity/
+    identity.spec.md               — Seed generation + Algorand address derivation
+  hub/
+    hub.spec.md                    — Hub client (Flock Directory, A2A forwarding)
+  transaction/
+    transaction.spec.md            — Algorand transaction construction + signing
+  agent/
+    agent.spec.md                  — Message polling loop
 ```
