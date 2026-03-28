@@ -102,17 +102,13 @@ pub async fn run_message_loop<A, I, S, M>(
                     );
 
                     // Step 1: Forward to hub
-                    let task_id = match forward_to_hub(
-                        &http,
-                        &config.hub_url,
-                        &msg.sender,
-                        &msg.content,
-                    )
-                    .await
-                    {
-                        Some(id) => id,
-                        None => continue, // Hub unreachable, skip reply
-                    };
+                    let task_id =
+                        match forward_to_hub(&http, &config.hub_url, &msg.sender, &msg.content)
+                            .await
+                        {
+                            Some(id) => id,
+                            None => continue, // Hub unreachable, skip reply
+                        };
 
                     // Step 2: Poll for hub response
                     let response = match poll_hub_task(&http, &config.hub_url, &task_id).await {
@@ -206,11 +202,7 @@ async fn forward_to_hub(
 /// Polls `GET {hub_url}/a2a/tasks/{task_id}` until the task reaches a terminal
 /// state ("completed", "failed", "cancelled") or the poll limit is reached.
 async fn poll_hub_task(http: &Client, hub_url: &str, task_id: &str) -> Option<String> {
-    let url = format!(
-        "{}/a2a/tasks/{}",
-        hub_url.trim_end_matches('/'),
-        task_id
-    );
+    let url = format!("{}/a2a/tasks/{}", hub_url.trim_end_matches('/'), task_id);
 
     for attempt in 1..=HUB_POLL_MAX_ATTEMPTS {
         tokio::time::sleep(HUB_POLL_INTERVAL).await;
@@ -303,12 +295,7 @@ where
             .discover_key(recipient_address)
             .await
             .map_err(|e| anyhow::anyhow!("Key discovery failed: {}", e))?
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "No encryption key found for {}",
-                    recipient_address
-                )
-            })?;
+            .ok_or_else(|| anyhow::anyhow!("No encryption key found for {}", recipient_address))?;
 
         client
             .encrypt(message, &discovered.public_key)
