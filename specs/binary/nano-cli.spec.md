@@ -1,79 +1,128 @@
 ---
 module: nano-cli
-version: 1
-status: draft
+version: 2
+status: active
 files:
   - src/main.rs
+  - src/agent.rs
+  - src/algorand.rs
 depends_on:
   - specs/core/core.spec.md
-  - specs/crypto/crypto.spec.md
-  - specs/algochat/algochat.spec.md
+  - external: algochat (git: https://github.com/CorvidLabs/rs-algochat)
 ---
 
 # Nano CLI
 
 ## Purpose
 
-Binary entry point for corvid-agent-nano. Parses CLI arguments, initializes logging, and orchestrates the agent's lifecycle: crypto identity setup, Algorand node connection, Flock Directory registration, and the AlgoChat message loop. Provides a single-binary, instant-startup agent that connects to the corvid-agent ecosystem.
+Binary entry point for corvid-agent-nano. Parses CLI arguments, initializes crypto identity from an Ed25519 seed, creates HTTP-based Algorand clients, starts the AlgoChat message polling loop, and runs until Ctrl+C. Provides a single-binary, instant-startup agent that connects to the corvid-agent ecosystem via the AlgoChat protocol on Algorand.
 
 ## Public API
 
 ### CLI Arguments (clap)
 
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--algod-url` | `String` | `http://localhost:4001` | Algorand node REST API URL |
-| `--algod-token` | `String` | `aaa...aaa` (64 a's) | Algorand node API token (localnet default) |
-| `--name` | `String` | `nano` | Agent name for discovery and display |
-| `--hub-url` | `String` | `http://localhost:3578` | corvid-agent hub API URL |
+| Flag | Type | Default | Env Var | Description |
+|------|------|---------|---------|-------------|
+| `--algod-url` | `String` | `http://localhost:4001` | — | Algorand node REST API URL |
+| `--algod-token` | `String` | `aaa...aaa` (64 a's) | — | Algorand node API token |
+| `--indexer-url` | `String` | `http://localhost:8980` | — | Algorand indexer REST API URL |
+| `--indexer-token` | `String` | `aaa...aaa` (64 a's) | — | Algorand indexer API token |
+| `--seed` | `String` | (required) | `NANO_SEED` | Hex-encoded 32-byte Ed25519 private key |
+| `--address` | `String` | (required) | `NANO_ADDRESS` | Agent's Algorand address |
+| `--name` | `String` | `nano` | — | Agent name for discovery and display |
+| `--hub-url` | `String` | `http://localhost:3578` | — | corvid-agent hub API URL |
+| `--poll-interval` | `u64` | `5` | — | Message poll interval in seconds |
 
-### Structs
+### Source Modules
+
+| File | Description |
+|------|-------------|
+| `src/main.rs` | CLI parsing, identity init, client wiring, shutdown |
+| `src/algorand.rs` | `HttpAlgodClient` and `HttpIndexerClient` — HTTP adapters for rs-algochat traits |
+| `src/agent.rs` | `run_message_loop` — polls indexer for AlgoChat messages and processes them |
+
+### algorand.rs — HTTP Trait Implementations
+
+| Struct | Implements | Description |
+|--------|-----------|-------------|
+| `HttpAlgodClient` | `algochat::AlgodClient` | HTTP client for algod v2 REST API |
+| `HttpIndexerClient` | `algochat::IndexerClient` | HTTP client for indexer v2 REST API |
+
+#### HttpAlgodClient Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `get_suggested_params` | `GET /v2/transactions/params` | Fetch network params for transaction building |
+| `get_account_info` | `GET /v2/accounts/{addr}` | Fetch account balance and min-balance |
+| `submit_transaction` | `POST /v2/transactions` | Submit a signed transaction (binary body) |
+| `wait_for_confirmation` | `GET /v2/transactions/pending/{txid}` | Poll until confirmed or timeout |
+| `get_current_round` | `GET /v2/status` | Get the latest confirmed round |
+
+#### HttpIndexerClient Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `search_transactions` | `GET /v2/transactions?address=&note-prefix=AQ` | Search for AlgoChat txns (note prefix filters for protocol v1) |
+| `search_transactions_between` | (filters `search_transactions`) | Filter to only txns between two addresses |
+| `get_transaction` | `GET /v2/transactions/{txid}` | Fetch a specific transaction by ID |
+| `wait_for_indexer` | (polls `get_transaction`) | Poll until indexed or timeout |
+
+### agent.rs — Message Loop
+
+| Function | Parameters | Description |
+|----------|-----------|-------------|
+| `run_message_loop` | `Arc<AlgoChat<...>>`, `AgentLoopConfig` | Infinite loop: sync → process new messages → sleep → repeat |
 
 | Struct | Description |
 |--------|-------------|
-| `Cli` | clap `Parser` struct holding all CLI arguments |
-
-### Functions
-
-| Function | Parameters | Returns | Description |
-|----------|-----------|---------|-------------|
-| `main` | `()` | `Result<()>` | Async entry point — parses args, initializes agent, runs event loop |
+| `AgentLoopConfig` | `poll_interval_secs`, `hub_url`, `agent_name` |
 
 ## Invariants
 
-1. Logging is initialized via `tracing_subscriber` with `RUST_LOG` env filter, defaulting to `info` level
-2. The binary runs until `Ctrl+C` (`tokio::signal::ctrl_c`) — no other shutdown mechanism currently
-3. CLI argument parsing happens before any I/O or initialization
-4. The `--algod-token` default is the standard Algorand localnet token (64 'a' characters)
-5. All errors propagate via `anyhow::Result` — the binary exits with a non-zero code on unhandled errors
+1. `--seed` must be exactly 32 bytes (64 hex characters) — exits with error otherwise
+2. Identity is derived deterministically: same seed always produces same X25519 encryption key
+3. The AlgoChat client uses in-memory storage (messages and keys are not persisted across restarts)
+4. Logging is initialized via `tracing_subscriber` with `RUST_LOG` env filter, defaulting to `info`
+5. The binary runs until `Ctrl+C` or message loop panic — `tokio::select!` on both
+6. The indexer note-prefix filter `AQ` corresponds to AlgoChat protocol version 1 (first byte 0x01 → base64 `AQ`)
+7. All Algorand API calls use reqwest with `X-Algo-API-Token` or `X-Indexer-API-Token` headers
+8. Transaction confirmation polling retries once per second up to `rounds` attempts
 
 ## Behavioral Examples
 
-### Scenario: Default startup on localnet
+### Scenario: Startup with seed and address
 
-- **Given** no CLI arguments provided
-- **When** `nano` binary is executed
-- **Then** it connects to `http://localhost:4001` with localnet token, names itself "nano", logs "starting corvid-agent-nano" and "nano agent ready", then waits for Ctrl+C
-
-### Scenario: Custom name and hub
-
-- **Given** `--name scout --hub-url http://hub.example.com:3578`
+- **Given** `--seed 0102...3f40 --address ALGO...ADDR`
 - **When** the binary starts
-- **Then** the agent identifies as "scout" and targets the specified hub URL
+- **Then** it derives X25519 keys from the seed, logs the encryption public key, and starts polling for messages
+
+### Scenario: Message received
+
+- **Given** the agent is running and an AlgoChat-encrypted message arrives on-chain
+- **When** the sync loop picks up the transaction
+- **Then** it decrypts the message and logs sender, recipient, round, and content (truncated to 100 chars)
+
+### Scenario: Indexer unreachable
+
+- **Given** the indexer URL is wrong or the node is down
+- **When** the sync loop attempts to poll
+- **Then** it logs a warning and retries on the next interval (does not crash)
 
 ### Scenario: Ctrl+C shutdown
 
 - **Given** a running nano agent
-- **When** the user sends SIGINT (Ctrl+C)
-- **Then** it logs "shutting down" and exits cleanly with code 0
+- **When** SIGINT is received
+- **Then** logs "shutting down (ctrl+c)" and exits cleanly
 
 ## Error Cases
 
 | Condition | Behavior |
 |-----------|----------|
-| Invalid CLI arguments | clap prints help/error and exits with code 2 |
-| Logging init failure | Panic (tracing_subscriber failure is unrecoverable) |
-| Algorand node unreachable at startup | Currently no-op (TODO: health check on startup) |
+| Invalid hex in `--seed` | Exits with "Invalid seed hex" error |
+| Seed not 32 bytes | Exits with "Seed must be exactly 32 bytes" error |
+| Missing `--seed` or `--address` | clap prints help/error and exits with code 2 |
+| Algorand node unreachable | sync loop logs warning and retries next interval |
+| AlgoChat decryption failure | Message skipped, error logged |
 
 ## Dependencies
 
@@ -81,14 +130,14 @@ Binary entry point for corvid-agent-nano. Parses CLI arguments, initializes logg
 
 | Module | What is used |
 |--------|-------------|
-| `corvid-core` | `AgentIdentity`, `Message`, `NanoConfig` (future) |
-| `corvid-crypto` | `KeyPair` for identity initialization (future) |
-| `corvid-algochat` | `AlgoChatClient` for node connectivity (future) |
-| `clap` | `Parser` derive macro for CLI argument parsing |
-| `tokio` | Async runtime, `signal::ctrl_c` for graceful shutdown |
-| `tracing` | `info!` macro for structured logging |
-| `tracing-subscriber` | `fmt()` with `EnvFilter` for log initialization |
-| `anyhow` | `Result` for error propagation |
+| `corvid-core` | (currently unused, available for future AgentIdentity/NanoConfig integration) |
+| `algochat` (rs-algochat) | `AlgoChat`, `AlgoChatConfig`, `AlgorandConfig`, `InMemoryKeyStorage`, `InMemoryMessageCache`, trait definitions |
+| `reqwest` | HTTP client for Algorand API calls |
+| `clap` | CLI argument parsing with `derive` and `env` features |
+| `tokio` | Async runtime, signal handling, sleep |
+| `hex` | Seed hex decoding |
+| `data-encoding` | Base64 decoding for genesis hash |
+| `async-trait` | Async trait implementations |
 
 ### Consumed By
 
@@ -99,3 +148,4 @@ None — this is the binary entry point.
 | Date | Author | Change |
 |------|--------|--------|
 | 2026-03-28 | CorvidAgent | Initial spec — CLI skeleton with logging and graceful shutdown |
+| 2026-03-28 | CorvidAgent | v2: Full implementation — HTTP Algorand clients, AlgoChat identity, message loop |

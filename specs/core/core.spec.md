@@ -7,14 +7,15 @@ files:
   - crates/core/src/agent.rs
   - crates/core/src/message.rs
   - crates/core/src/config.rs
-depends_on: []
+depends_on:
+  - external: algochat (git: https://github.com/CorvidLabs/rs-algochat)
 ---
 
 # Core Types
 
 ## Purpose
 
-Shared types and data structures used across all corvid-agent-nano crates. Provides the foundational domain model: agent identity, AlgoChat messages, and runtime configuration. This crate has zero network or crypto dependencies — it is pure data.
+Shared types and data structures used across all corvid-agent-nano crates. Provides the foundational domain model: agent identity, AlgoChat messages, and runtime configuration. Re-exports the external `algochat` crate (from `rs-algochat`) which provides X25519 key derivation, ChaCha20-Poly1305 encryption, and the full AlgoChat protocol. The local `corvid-crypto` and `corvid-algochat` crates have been replaced by this external dependency.
 
 ## Public API
 
@@ -68,8 +69,8 @@ Shared types and data structures used across all corvid-agent-nano crates. Provi
 2. `AgentIdentity.public_key` must be a valid base64-encoded 32-byte X25519 public key when used in crypto operations
 3. `Message.txid` is `None` for outgoing messages before submission, `Some(txid)` for confirmed on-chain messages
 4. `NanoConfig.algod_url` must be a valid HTTP(S) URL
-5. This crate has no side effects — no I/O, no networking, no filesystem access
-6. `lib.rs` re-exports `AgentIdentity` and `Message` but NOT `NanoConfig` (config is accessed via `config::NanoConfig`)
+5. `lib.rs` re-exports `AgentIdentity` and `Message` but NOT `NanoConfig` (config is accessed via `config::NanoConfig`)
+6. `lib.rs` re-exports the external `algochat` crate for convenient access to crypto and protocol types
 
 ## Behavioral Examples
 
@@ -105,18 +106,17 @@ Shared types and data structures used across all corvid-agent-nano crates. Provi
 | Module | What is used |
 |--------|-------------|
 | `serde` | `Serialize`, `Deserialize` derive macros |
+| `algochat` (external, git: rs-algochat) | Re-exported for crypto, key derivation, and AlgoChat protocol |
 
 ### Consumed By
 
 | Module | What is used |
 |--------|-------------|
-| `crates/crypto/src/identity.rs` | (future) `AgentIdentity` for key binding |
-| `crates/algochat/src/client.rs` | `Message` for send/receive |
-| `crates/algochat/src/listener.rs` | `Message` for incoming message construction |
-| `src/main.rs` | `NanoConfig` for runtime configuration |
+| `src/main.rs` | `NanoConfig` for runtime configuration, `algochat` re-export for crypto/protocol |
 
 ## Change Log
 
 | Date | Author | Change |
 |------|--------|--------|
 | 2026-03-28 | CorvidAgent | Initial spec |
+| 2026-03-28 | CorvidAgent | Replace local crypto/algochat crates with external rs-algochat dependency |

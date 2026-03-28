@@ -6,3 +6,6 @@ pub mod message;
 
 pub use agent::AgentIdentity;
 pub use message::Message;
+
+// Re-export the external algochat crate for convenient access.
+pub use algochat;

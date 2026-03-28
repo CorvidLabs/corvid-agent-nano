@@ -1,6 +1,15 @@
+use std::sync::Arc;
+
 use anyhow::Result;
 use clap::Parser;
 use tracing::info;
+
+use algochat::{AlgoChat, AlgoChatConfig, AlgorandConfig, InMemoryKeyStorage, InMemoryMessageCache};
+
+mod agent;
+mod algorand;
+
+use algorand::{HttpAlgodClient, HttpIndexerClient};
 
 #[derive(Parser)]
 #[command(name = "nano", about = "Corvid Agent Nano — lightweight Rust agent")]
@@ -13,6 +22,22 @@ struct Cli {
     #[arg(long, default_value = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
     algod_token: String,
 
+    /// Algorand indexer URL
+    #[arg(long, default_value = "http://localhost:8980")]
+    indexer_url: String,
+
+    /// Algorand indexer token
+    #[arg(long, default_value = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    indexer_token: String,
+
+    /// Agent seed (hex-encoded 32-byte Ed25519 private key)
+    #[arg(long, env = "NANO_SEED")]
+    seed: String,
+
+    /// Agent Algorand address
+    #[arg(long, env = "NANO_ADDRESS")]
+    address: String,
+
     /// Agent name for discovery
     #[arg(long, default_value = "nano")]
     name: String,
@@ -20,6 +45,10 @@ struct Cli {
     /// corvid-agent hub URL (for API communication)
     #[arg(long, default_value = "http://localhost:3578")]
     hub_url: String,
+
+    /// Poll interval in seconds
+    #[arg(long, default_value = "5")]
+    poll_interval: u64,
 }
 
 #[tokio::main]
@@ -36,21 +65,77 @@ async fn main() -> Result<()> {
     info!(
         name = %cli.name,
         algod = %cli.algod_url,
+        indexer = %cli.indexer_url,
         hub = %cli.hub_url,
         "starting corvid-agent-nano"
     );
 
-    // TODO: Initialize crypto identity (X25519 keypair)
-    // TODO: Connect to Algorand node
-    // TODO: Register in Flock Directory
-    // TODO: Start AlgoChat message loop
-    // TODO: Connect to hub API
+    // Parse seed from hex
+    let seed_bytes = hex::decode(&cli.seed)
+        .map_err(|e| anyhow::anyhow!("Invalid seed hex: {}", e))?;
+    if seed_bytes.len() != 32 {
+        anyhow::bail!("Seed must be exactly 32 bytes (64 hex chars), got {}", seed_bytes.len());
+    }
+    let mut seed = [0u8; 32];
+    seed.copy_from_slice(&seed_bytes);
 
-    info!("nano agent ready — waiting for messages");
+    // Build Algorand clients
+    let algod = HttpAlgodClient::new(&cli.algod_url, &cli.algod_token);
+    let indexer = HttpIndexerClient::new(&cli.indexer_url, &cli.indexer_token);
 
-    // Keep running
-    tokio::signal::ctrl_c().await?;
-    info!("shutting down");
+    // Build AlgoChat config
+    let network = AlgorandConfig::new(&cli.algod_url, &cli.algod_token)
+        .with_indexer(&cli.indexer_url, &cli.indexer_token);
+    let config = AlgoChatConfig::new(network);
+
+    // Initialize AlgoChat client
+    let client = AlgoChat::from_seed(
+        &seed,
+        &cli.address,
+        config,
+        algod,
+        indexer,
+        InMemoryKeyStorage::new(),
+        InMemoryMessageCache::new(),
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("Failed to initialize AlgoChat: {}", e))?;
+
+    let pub_key = hex::encode(client.encryption_public_key());
+    info!(
+        address = %cli.address,
+        encryption_key = %pub_key,
+        "identity initialized"
+    );
+
+    let client = Arc::new(client);
+
+    // Start the message polling loop in a background task
+    let loop_client = Arc::clone(&client);
+    let loop_config = agent::AgentLoopConfig {
+        poll_interval_secs: cli.poll_interval,
+        hub_url: cli.hub_url.clone(),
+        agent_name: cli.name.clone(),
+    };
+
+    let message_task = tokio::spawn(async move {
+        agent::run_message_loop(loop_client, loop_config).await;
+    });
+
+    info!("nano agent ready — listening for AlgoChat messages");
+
+    // Wait for Ctrl+C or task failure
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {
+            info!("shutting down (ctrl+c)");
+        }
+        result = message_task => {
+            match result {
+                Ok(()) => info!("message loop ended"),
+                Err(e) => tracing::error!(error = %e, "message loop panicked"),
+            }
+        }
+    }
 
     Ok(())
 }
