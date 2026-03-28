@@ -1,0 +1,45 @@
+[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/CorvidLabs/corvid-agent-nano"
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+reqwest = { version = "0.12", features = ["json"] }
+x25519-dalek = "2"
+chacha20poly1305 = "0.10"
+base64 = "0.22"
+rand = "0.8"
+clap = { version = "4", features = ["derive"] }
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+[package]
+name = "corvid-agent-nano"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "nano"
+path = "src/main.rs"
+
+[dependencies]
+corvid-core = { path = "crates/core" }
+corvid-algochat = { path = "crates/algochat" }
+corvid-crypto = { path = "crates/crypto" }
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap.workspace = true
