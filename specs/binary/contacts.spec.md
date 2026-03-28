@@ -27,12 +27,8 @@ PSK (pre-shared key) contact management backed by SQLite. Provides CRUD operatio
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
 | `parse_psk` | `input: &str` | `Result<[u8; 32]>` | Parse a PSK from hex (64 chars) or base64 (44 chars) format |
-
-### ContactStore Methods
-
-| Method | Parameters | Returns | Description |
-|--------|-----------|---------|-------------|
-| `open` | `path: impl AsRef<Path>` | `Result<Self>` | Open or create the contacts SQLite database |
+| `open` | `path: impl AsRef<Path>` | `Result<Self>` | Open or create the contacts SQLite database (on `ContactStore`) |
+| `in_memory` | — | `Result<Self>` | Create an in-memory contacts database for testing (on `ContactStore`) |
 | `add` | `name: &str`, `address: &str`, `psk: &[u8]` | `Result<()>` | Add a new contact; errors if name already exists |
 | `upsert` | `name: &str`, `address: &str`, `psk: &[u8]` | `Result<()>` | Add or overwrite a contact (INSERT OR REPLACE) |
 | `remove` | `name: &str` | `Result<bool>` | Remove a contact by name; returns true if deleted, false if not found |
