@@ -1,0 +1,8 @@
+[registry]
+name = "corvid-agent-nano"
+
+[specs]
+core = "specs/core/core.spec.md"
+crypto = "specs/crypto/crypto.spec.md"
+algochat = "specs/algochat/algochat.spec.md"
+nano-cli = "specs/binary/nano-cli.spec.md"
