@@ -1,6 +1,6 @@
 ---
 module: nano-cli
-version: 2
+version: 5
 status: active
 files:
   - src/main.rs
@@ -8,7 +8,6 @@ files:
   - src/algorand.rs
 depends_on:
   - specs/core/core.spec.md
-  - external: algochat (git: https://github.com/CorvidLabs/rs-algochat)
 ---
 
 # Nano CLI
@@ -18,6 +17,22 @@ depends_on:
 Binary entry point for corvid-agent-nano. Parses CLI arguments, initializes crypto identity from an Ed25519 seed, creates HTTP-based Algorand clients, starts the AlgoChat message polling loop, and runs until Ctrl+C. Provides a single-binary, instant-startup agent that connects to the corvid-agent ecosystem via the AlgoChat protocol on Algorand.
 
 ## Public API
+
+### Exported Structs
+
+| Struct | Description |
+|--------|-------------|
+| `AgentLoopConfig` | Configuration for the message polling loop: poll interval, hub URL, agent name |
+| `HttpAlgodClient` | HTTP adapter implementing `algochat::AlgodClient` for algod v2 REST API |
+| `HttpIndexerClient` | HTTP adapter implementing `algochat::IndexerClient` for indexer v2 REST API |
+
+### Exported Functions
+
+| Function | Parameters | Returns | Description |
+|----------|-----------|---------|-------------|
+| `run_message_loop` | `Arc<AlgoChat<...>>`, `AgentLoopConfig` | `!` | Infinite loop: sync → forward to hub → sleep → repeat |
+| `new` | `base_url: &str`, `token: &str` | `Self` | Constructor for `HttpAlgodClient` and `HttpIndexerClient` |
+| `decode` | `s: &str` | `Result<Vec<u8>, DecodeError>` | Decode a base64 string to bytes |
 
 ### CLI Arguments (clap)
 
@@ -31,6 +46,7 @@ Binary entry point for corvid-agent-nano. Parses CLI arguments, initializes cryp
 | `--address` | `String` | (required) | `NANO_ADDRESS` | Agent's Algorand address |
 | `--name` | `String` | `nano` | — | Agent name for discovery and display |
 | `--hub-url` | `String` | `http://localhost:3578` | — | corvid-agent hub API URL |
+| `--data-dir` | `String` | `./data` | — | Data directory for persistent SQLite storage |
 | `--poll-interval` | `u64` | `5` | — | Message poll interval in seconds |
 
 ### Source Modules
@@ -47,6 +63,13 @@ Binary entry point for corvid-agent-nano. Parses CLI arguments, initializes cryp
 |--------|-----------|-------------|
 | `HttpAlgodClient` | `algochat::AlgodClient` | HTTP client for algod v2 REST API |
 | `HttpIndexerClient` | `algochat::IndexerClient` | HTTP client for indexer v2 REST API |
+
+#### Constructors
+
+| Method | Parameters | Description |
+|--------|-----------|-------------|
+| `HttpAlgodClient::new` | `base_url: &str`, `token: &str` | Create a new HTTP algod client with the given URL and API token |
+| `HttpIndexerClient::new` | `base_url: &str`, `token: &str` | Create a new HTTP indexer client with the given URL and API token |
 
 #### HttpAlgodClient Endpoints
 
@@ -67,21 +90,36 @@ Binary entry point for corvid-agent-nano. Parses CLI arguments, initializes cryp
 | `get_transaction` | `GET /v2/transactions/{txid}` | Fetch a specific transaction by ID |
 | `wait_for_indexer` | (polls `get_transaction`) | Poll until indexed or timeout |
 
-### agent.rs — Message Loop
+### agent.rs — Message Loop & Hub Forwarding
 
 | Function | Parameters | Description |
 |----------|-----------|-------------|
-| `run_message_loop` | `Arc<AlgoChat<...>>`, `AgentLoopConfig` | Infinite loop: sync → process new messages → sleep → repeat |
+| `run_message_loop` | `Arc<AlgoChat<...>>`, `AgentLoopConfig` | Infinite loop: sync → forward to hub → sleep → repeat |
+| `forward_to_hub` | `&Client`, hub_url, sender, content | POST message to hub's A2A task endpoint (fire-and-forget) |
 
 | Struct | Description |
 |--------|-------------|
 | `AgentLoopConfig` | `poll_interval_secs`, `hub_url`, `agent_name` |
+| `HubTaskRequest` | JSON payload: `message` (String), `timeoutMs` (u64) |
+| `HubTaskResponse` | JSON response: `id` (String), `state` (String) |
+
+#### Hub Forwarding Protocol
+
+Messages are forwarded to `POST {hub_url}/a2a/tasks/send` with payload:
+```json
+{
+  "message": "[AlgoChat from SENDER_ADDRESS] MESSAGE_CONTENT",
+  "timeoutMs": 300000
+}
+```
+
+Forwarding is fire-and-forget: the agent logs the task ID but does not poll for completion. If the hub is unreachable, a warning is logged and the agent continues polling.
 
 ## Invariants
 
 1. `--seed` must be exactly 32 bytes (64 hex characters) — exits with error otherwise
 2. Identity is derived deterministically: same seed always produces same X25519 encryption key
-3. The AlgoChat client uses in-memory storage (messages and keys are not persisted across restarts)
+3. The AlgoChat client uses SQLite storage (`data_dir/keys.db` and `data_dir/messages.db`) — messages, keys, and sync-round bookmarks persist across restarts
 4. Logging is initialized via `tracing_subscriber` with `RUST_LOG` env filter, defaulting to `info`
 5. The binary runs until `Ctrl+C` or message loop panic — `tokio::select!` on both
 6. The indexer note-prefix filter `AQ` corresponds to AlgoChat protocol version 1 (first byte 0x01 → base64 `AQ`)
@@ -96,11 +134,17 @@ Binary entry point for corvid-agent-nano. Parses CLI arguments, initializes cryp
 - **When** the binary starts
 - **Then** it derives X25519 keys from the seed, logs the encryption public key, and starts polling for messages
 
-### Scenario: Message received
+### Scenario: Message received and forwarded
 
 - **Given** the agent is running and an AlgoChat-encrypted message arrives on-chain
 - **When** the sync loop picks up the transaction
-- **Then** it decrypts the message and logs sender, recipient, round, and content (truncated to 100 chars)
+- **Then** it decrypts the message, logs sender/recipient/round/content (truncated to 100 chars), and forwards to the hub via `POST /a2a/tasks/send`
+
+### Scenario: Hub unreachable during forwarding
+
+- **Given** the agent receives a valid message but the hub is down
+- **When** forwarding is attempted
+- **Then** it logs a warning and continues the polling loop (does not crash or block)
 
 ### Scenario: Indexer unreachable
 
@@ -123,6 +167,10 @@ Binary entry point for corvid-agent-nano. Parses CLI arguments, initializes cryp
 | Missing `--seed` or `--address` | clap prints help/error and exits with code 2 |
 | Algorand node unreachable | sync loop logs warning and retries next interval |
 | AlgoChat decryption failure | Message skipped, error logged |
+| Data directory creation fails | Exits with filesystem error |
+| SQLite database cannot be opened | Exits with "Failed to open key storage" / "Failed to open message cache" |
+| Hub API unreachable | Warning logged, loop continues |
+| Hub returns non-2xx | Warning logged with status code, loop continues |
 
 ## Dependencies
 
@@ -130,8 +178,8 @@ Binary entry point for corvid-agent-nano. Parses CLI arguments, initializes cryp
 
 | Module | What is used |
 |--------|-------------|
-| `corvid-core` | (currently unused, available for future AgentIdentity/NanoConfig integration) |
-| `algochat` (rs-algochat) | `AlgoChat`, `AlgoChatConfig`, `AlgorandConfig`, `InMemoryKeyStorage`, `InMemoryMessageCache`, trait definitions |
+| `corvid-core` | `SqliteKeyStorage`, `SqliteMessageCache` for persistent storage |
+| `algochat` (rs-algochat) | `AlgoChat`, `AlgoChatConfig`, `AlgorandConfig`, trait definitions |
 | `reqwest` | HTTP client for Algorand API calls |
 | `clap` | CLI argument parsing with `derive` and `env` features |
 | `tokio` | Async runtime, signal handling, sleep |
@@ -149,3 +197,6 @@ None — this is the binary entry point.
 |------|--------|--------|
 | 2026-03-28 | CorvidAgent | Initial spec — CLI skeleton with logging and graceful shutdown |
 | 2026-03-28 | CorvidAgent | v2: Full implementation — HTTP Algorand clients, AlgoChat identity, message loop |
+| 2026-03-28 | CorvidAgent | v3: Hub forwarding — messages forwarded to A2A tasks/send endpoint, unit tests added |
+| 2026-03-28 | CorvidAgent | v4: SQLite persistence — replace in-memory storage with SqliteKeyStorage/SqliteMessageCache, add --data-dir flag |
+| 2026-03-28 | CorvidAgent | v5: Add Exported Structs/Functions sections for spec-sync strict compliance |

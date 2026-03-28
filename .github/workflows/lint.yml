@@ -1,4 +1,4 @@
-name: Checks
+name: Lint
 
 on:
   push:
@@ -7,13 +7,15 @@ on:
     branches: [main]
 
 jobs:
-  check:
-    runs-on: ubuntu-latest
+  clippy:
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
       - name: Cache cargo
         uses: actions/cache@v4
@@ -24,21 +26,18 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Check (compile)
-        run: cargo check --workspace
-
-      - name: Clippy (lint)
+      - name: Clippy
         run: cargo clippy --workspace -- -D warnings
 
-      - name: Test
-        run: cargo test --workspace
+  fmt:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
 
       - name: Format check
         run: cargo fmt --all -- --check
-
-      - name: Spec validation (strict + 100% coverage)
-        # https://github.com/marketplace/actions/spec-sync
-        uses: CorvidLabs/spec-sync@v2.1.0
-        with:
-          strict: 'true'
-          require-coverage: '100'

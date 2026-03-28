@@ -4,7 +4,8 @@ use anyhow::Result;
 use clap::Parser;
 use tracing::info;
 
-use algochat::{AlgoChat, AlgoChatConfig, AlgorandConfig, InMemoryKeyStorage, InMemoryMessageCache};
+use algochat::{AlgoChat, AlgoChatConfig, AlgorandConfig};
+use corvid_core::storage::{SqliteKeyStorage, SqliteMessageCache};
 
 mod agent;
 mod algorand;
@@ -19,7 +20,10 @@ struct Cli {
     algod_url: String,
 
     /// Algorand node token
-    #[arg(long, default_value = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    #[arg(
+        long,
+        default_value = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    )]
     algod_token: String,
 
     /// Algorand indexer URL
@@ -27,7 +31,10 @@ struct Cli {
     indexer_url: String,
 
     /// Algorand indexer token
-    #[arg(long, default_value = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    #[arg(
+        long,
+        default_value = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    )]
     indexer_token: String,
 
     /// Agent seed (hex-encoded 32-byte Ed25519 private key)
@@ -46,6 +53,10 @@ struct Cli {
     #[arg(long, default_value = "http://localhost:3578")]
     hub_url: String,
 
+    /// Data directory for persistent storage
+    #[arg(long, default_value = "./data")]
+    data_dir: String,
+
     /// Poll interval in seconds
     #[arg(long, default_value = "5")]
     poll_interval: u64,
@@ -55,8 +66,7 @@ struct Cli {
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 
@@ -71,13 +81,20 @@ async fn main() -> Result<()> {
     );
 
     // Parse seed from hex
-    let seed_bytes = hex::decode(&cli.seed)
-        .map_err(|e| anyhow::anyhow!("Invalid seed hex: {}", e))?;
+    let seed_bytes =
+        hex::decode(&cli.seed).map_err(|e| anyhow::anyhow!("Invalid seed hex: {}", e))?;
     if seed_bytes.len() != 32 {
-        anyhow::bail!("Seed must be exactly 32 bytes (64 hex chars), got {}", seed_bytes.len());
+        anyhow::bail!(
+            "Seed must be exactly 32 bytes (64 hex chars), got {}",
+            seed_bytes.len()
+        );
     }
     let mut seed = [0u8; 32];
     seed.copy_from_slice(&seed_bytes);
+
+    // Ensure data directory exists
+    let data_dir = std::path::Path::new(&cli.data_dir);
+    std::fs::create_dir_all(data_dir)?;
 
     // Build Algorand clients
     let algod = HttpAlgodClient::new(&cli.algod_url, &cli.algod_token);
@@ -88,6 +105,14 @@ async fn main() -> Result<()> {
         .with_indexer(&cli.indexer_url, &cli.indexer_token);
     let config = AlgoChatConfig::new(network);
 
+    // Initialize persistent SQLite storage
+    let key_storage = SqliteKeyStorage::open(data_dir.join("keys.db"))
+        .map_err(|e| anyhow::anyhow!("Failed to open key storage: {}", e))?;
+    let message_cache = SqliteMessageCache::open(data_dir.join("messages.db"))
+        .map_err(|e| anyhow::anyhow!("Failed to open message cache: {}", e))?;
+
+    info!(data_dir = %cli.data_dir, "persistent storage initialized");
+
     // Initialize AlgoChat client
     let client = AlgoChat::from_seed(
         &seed,
@@ -95,8 +120,8 @@ async fn main() -> Result<()> {
         config,
         algod,
         indexer,
-        InMemoryKeyStorage::new(),
-        InMemoryMessageCache::new(),
+        key_storage,
+        message_cache,
     )
     .await
     .map_err(|e| anyhow::anyhow!("Failed to initialize AlgoChat: {}", e))?;

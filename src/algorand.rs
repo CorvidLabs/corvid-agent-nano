@@ -3,11 +3,11 @@
 //! Implements the `AlgodClient` and `IndexerClient` traits from rs-algochat
 //! using reqwest to talk to real Algorand nodes.
 
+use algochat::Result;
 use algochat::{
     AccountInfo, AlgoChatError, AlgodClient, IndexerClient, NoteTransaction, SuggestedParams,
     TransactionInfo,
 };
-use algochat::Result;
 use reqwest::Client;
 use serde::Deserialize;
 use tracing::debug;
@@ -379,5 +379,51 @@ mod base64 {
 
     pub fn decode(s: &str) -> std::result::Result<Vec<u8>, data_encoding::DecodeError> {
         BASE64.decode(s.as_bytes())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn base64_decode_32_valid() {
+        // 32 zero bytes in base64
+        let b64 = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+        let result = base64_decode_32(b64).unwrap();
+        assert_eq!(result, [0u8; 32]);
+    }
+
+    #[test]
+    fn base64_decode_32_wrong_length() {
+        // 16 bytes (too short)
+        let b64 = "AAAAAAAAAAAAAAAAAAAAAA==";
+        let result = base64_decode_32(b64);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn base64_decode_32_invalid_base64() {
+        let result = base64_decode_32("not-valid-base64!!!");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn http_algod_client_trims_trailing_slash() {
+        let client = HttpAlgodClient::new("http://localhost:4001/", "token");
+        assert_eq!(client.base_url, "http://localhost:4001");
+    }
+
+    #[test]
+    fn http_indexer_client_trims_trailing_slash() {
+        let client = HttpIndexerClient::new("http://localhost:8980/", "token");
+        assert_eq!(client.base_url, "http://localhost:8980");
+    }
+
+    #[test]
+    fn http_algod_client_no_trailing_slash() {
+        let client = HttpAlgodClient::new("http://localhost:4001", "mytoken");
+        assert_eq!(client.base_url, "http://localhost:4001");
+        assert_eq!(client.token, "mytoken");
     }
 }
