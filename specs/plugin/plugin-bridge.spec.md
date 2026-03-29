@@ -161,8 +161,7 @@ interface HealthStatus {
 | Module | What is used |
 |--------|-------------|
 | `server/routes/plugins.ts` | `PluginBridge` for REST endpoints |
-| `server/tools/registry.ts` | Auto-registered plugin tools |
-| Agent tool invocation pipeline | Plugin tools callable like any built-in tool |
+| Agent tool invocation pipeline | Plugin tools callable like any built-in tool via auto-registration |
 
 ## Configuration
 
