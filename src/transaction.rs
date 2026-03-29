@@ -34,6 +34,59 @@ pub async fn send_note_transaction(
     Ok(txid)
 }
 
+/// Build a msgpack-encoded Algorand payment transaction with an amount.
+///
+/// Creates a payment transaction for the given amount (in microAlgos).
+/// Fields are written in strict alphabetical order as required by Algorand.
+/// If amount is 0, the `amt` field is omitted.
+pub fn build_payment_transaction_with_amount(
+    sender: &str,
+    receiver: &str,
+    amount: u64,
+    params: &SuggestedParams,
+) -> anyhow::Result<Vec<u8>> {
+    let sender_bytes = decode_address(sender)?;
+    let receiver_bytes = decode_address(receiver)?;
+
+    let mut buf = Vec::with_capacity(256);
+
+    // Fields in alphabetical order: amt, fee, fv, gen, gh, lv, rcv, snd, type
+    let field_count: u32 = if amount > 0 { 9 } else { 8 };
+    rmp::encode::write_map_len(&mut buf, field_count)
+        .map_err(|e| anyhow::anyhow!("msgpack encode error: {}", e))?;
+
+    if amount > 0 {
+        write_str(&mut buf, "amt")?;
+        write_uint(&mut buf, amount)?;
+    }
+
+    write_str(&mut buf, "fee")?;
+    write_uint(&mut buf, params.min_fee)?;
+
+    write_str(&mut buf, "fv")?;
+    write_uint(&mut buf, params.first_valid)?;
+
+    write_str(&mut buf, "gen")?;
+    write_str(&mut buf, &params.genesis_id)?;
+
+    write_str(&mut buf, "gh")?;
+    write_bin(&mut buf, &params.genesis_hash)?;
+
+    write_str(&mut buf, "lv")?;
+    write_uint(&mut buf, params.last_valid)?;
+
+    write_str(&mut buf, "rcv")?;
+    write_bin(&mut buf, &receiver_bytes)?;
+
+    write_str(&mut buf, "snd")?;
+    write_bin(&mut buf, &sender_bytes)?;
+
+    write_str(&mut buf, "type")?;
+    write_str(&mut buf, "pay")?;
+
+    Ok(buf)
+}
+
 /// Build a msgpack-encoded Algorand payment transaction.
 ///
 /// Creates a 0-ALGO payment transaction with the given note field.
