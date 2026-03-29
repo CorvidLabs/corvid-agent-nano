@@ -3,6 +3,7 @@ module: plugin-host
 version: 1
 status: active
 files:
+  - crates/corvid-plugin-host/src/lib.rs
   - crates/corvid-plugin-host/src/main.rs
   - crates/corvid-plugin-host/src/engine.rs
   - crates/corvid-plugin-host/src/loader.rs
@@ -10,6 +11,7 @@ files:
   - crates/corvid-plugin-host/src/executor.rs
   - crates/corvid-plugin-host/src/sandbox.rs
   - crates/corvid-plugin-host/src/discovery.rs
+  - crates/corvid-plugin-host/src/host_functions/mod.rs
   - crates/corvid-plugin-host/src/host_functions/messaging.rs
   - crates/corvid-plugin-host/src/host_functions/storage.rs
   - crates/corvid-plugin-host/src/host_functions/algo.rs
@@ -34,6 +36,24 @@ The Rust sidecar binary that hosts WASM plugins for corvid-agent. Runs as a sepa
 - Panic isolation: plugin panics caught at Wasmtime boundary, never crash Bun
 
 ## Public API
+
+### Exported Modules
+
+| Module | Description |
+|--------|-------------|
+| `discovery` | Plugin discovery API for TypeScript bridge |
+| `engine` | Wasmtime engine configuration and AOT cache |
+| `executor` | Legacy event dispatch to subscribing plugins |
+| `host_functions` | Capability-gated host function implementations |
+| `invoke` | WASM tool invocation and event dispatch |
+| `loader` | Plugin loading pipeline: ABI, signature, manifest, instantiation |
+| `registry` | Plugin registry with hot-reload drain pattern |
+| `sandbox` | Per-tier resource limits and SSRF mitigation |
+| `wasm_mem` | Safe WASM linear memory access helpers |
+| `algo` | Algorand state query host functions |
+| `http` | Outbound HTTP host functions with SSRF protection |
+| `messaging` | Agent message dispatch host functions |
+| `storage` | Scoped key-value storage host functions |
 
 ### IPC Protocol (Unix Domain Socket)
 
@@ -61,11 +81,77 @@ The Rust sidecar binary that hosts WASM plugins for corvid-agent. Runs as a sepa
 |--------|------|-------------|
 | `PluginSlot` | `registry.rs` | Holds a plugin instance with hot-reload drain pattern |
 | `CallGuard` | `registry.rs` | RAII guard tracking active calls for drain synchronization |
+| `PluginRegistry` | `registry.rs` | Thread-safe registry of loaded plugins |
 | `LoadedPlugin` | `loader.rs` | Validated plugin instance with manifest and tier |
+| `PluginState` | `loader.rs` | Per-instance WASM state: limiter, storage, HTTP, algo, messaging backends |
 | `SandboxLimits` | `sandbox.rs` | Per-tier memory, fuel, and timeout limits |
+| `MemoryLimiter` | `sandbox.rs` | Wasmtime ResourceLimiter for capping plugin memory |
 | `InvokeContext` | `invoke.rs` | Shared backends for plugin tool invocations and event dispatch |
+| `ToolInfo` | `discovery.rs` | Tool descriptor: name, description, input JSON Schema |
+| `ListResponse` | `discovery.rs` | Response wrapper for plugin list queries |
+| `ToolsResponse` | `discovery.rs` | Response wrapper for tool list queries |
+| `PluginToolEntry` | `discovery.rs` | Tool entry with owning plugin ID |
 | `AlgoBackend` | `host_functions/algo.rs` | Pluggable Algorand state query backend |
 | `MessagingBackend` | `host_functions/messaging.rs` | Pluggable agent message dispatch backend |
+| `StorageBackend` | `host_functions/storage.rs` | Per-plugin namespace-scoped key-value store |
+
+### Exported Enums
+
+| Enum | File | Description |
+|------|------|-------------|
+| `LoadError` | `loader.rs` | Plugin loading errors: ABI mismatch, signature invalid, manifest invalid, host too old, WASM error |
+
+### Exported Traits
+
+| Trait | File | Description |
+|-------|------|-------------|
+| `AlgoQuery` | `host_functions/algo.rs` | Pluggable Algorand state query interface |
+| `MessageDispatch` | `host_functions/messaging.rs` | Pluggable agent message dispatch interface |
+
+### Exported Functions
+
+| Function | File | Description |
+|----------|------|-------------|
+| `build_engine` | `engine.rs` | Create a Wasmtime Engine with AOT cache |
+| `validate_manifest` | `loader.rs` | Validate a plugin manifest (ID, semver, capabilities) |
+| `check_abi_version` | `loader.rs` | Extract and verify ABI version from WASM instance |
+| `parse_sig_file` | `loader.rs` | Parse an Ed25519 detached signature file |
+| `is_key_trusted` | `loader.rs` | Check if a public key is in the trusted keys registry |
+| `verify_signature` | `loader.rs` | Verify Ed25519 signature on WASM binary |
+| `extract_manifest` | `loader.rs` | Extract PluginManifest from a WASM instance |
+| `load_plugin` | `loader.rs` | Full 4-step plugin load pipeline |
+| `new` | various | Constructor for PluginSlot, PluginRegistry, MemoryLimiter, StorageBackend, AlgoBackend, MessagingBackend |
+| `is_active` | `registry.rs` | Check if a PluginSlot is in ACTIVE state |
+| `is_draining` | `registry.rs` | Check if a PluginSlot is in DRAINING state |
+| `try_acquire` | `registry.rs` | Acquire a CallGuard for an active plugin slot |
+| `drain_and_reload` | `registry.rs` | Hot-reload: drain in-flight calls, swap plugin instance |
+| `unload` | `registry.rs` | Gracefully unload a plugin |
+| `state_str` | `registry.rs` | Get human-readable state string for a PluginSlot |
+| `list_manifests` | `registry.rs` | List all loaded plugin manifests |
+| `health_status` | `registry.rs` | Get health status of all plugins |
+| `len` | `registry.rs` | Count loaded plugins |
+| `is_empty` | `registry.rs` | Check if registry has no plugins |
+| `dispatch_event` | `executor.rs` | Route a PluginEvent to subscribing plugins |
+| `dispatch_event_counted` | `executor.rs` | Route a PluginEvent and return dispatch count |
+| `for_tier` | `sandbox.rs` | Create SandboxLimits for a given TrustTier |
+| `is_ssrf_blocked` | `sandbox.rs` | Check if a URL is blocked by SSRF mitigation |
+| `list_plugins` | `discovery.rs` | List all plugins for the TypeScript bridge |
+| `list_tools` | `discovery.rs` | List tools (all or filtered by plugin) |
+| `link` | `host_functions/*.rs` | Link host functions into a WASM linker for a capability |
+| `link_host_functions` | `host_functions/mod.rs` | Link all host functions based on granted capabilities |
+| `set` | `host_functions/storage.rs` | Write a value to the plugin's scoped KV store |
+| `validate_url` | `host_functions/http.rs` | Validate URL against allowlist and SSRF rules |
+| `read_bytes` | `wasm_mem.rs` | Read bytes from plugin WASM linear memory |
+| `read_str` | `wasm_mem.rs` | Read UTF-8 string from plugin WASM linear memory |
+| `write_response` | `wasm_mem.rs` | Allocate and write response data to WASM memory |
+| `invoke_tool` | `invoke.rs` | Execute a plugin tool via WASM `__corvid_invoke` export |
+| `dispatch_event_to_plugin` | `invoke.rs` | Deliver an event to a single plugin via WASM `__corvid_on_event` |
+| `register` | `registry.rs` | Register a loaded plugin into the registry |
+| `get` | various | Retrieve a plugin by ID (registry) or a value by key (storage) |
+| `reload` | `registry.rs` | Hot-reload a plugin by ID with a new LoadedPlugin |
+| `send` | `host_functions/messaging.rs` | Send a message via the messaging backend |
+| `app_state` | `host_functions/algo.rs` | Query Algorand application state |
+| `matches_target_filter` | `host_functions/messaging.rs` | Check if a target matches the plugin's target filter |
 
 ## Modules
 

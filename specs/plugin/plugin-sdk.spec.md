@@ -24,6 +24,18 @@ This crate is the **semver stability boundary**. Breaking changes bump `ABI_VERS
 
 ## Public API
 
+### Exported Modules
+
+| Module | Description |
+|--------|-------------|
+| `capability` | Capability enum and Display impl |
+| `context` | InitContext and ToolContext structs |
+| `error` | PluginError, PluginEvent, and EventKind types |
+| `host_api` | WASM host function imports (extern "C") |
+| `manifest` | PluginManifest and TrustTier types |
+| `service` | Host-provided service traits |
+| `tool` | PluginTool trait |
+
 ### Exported Constants
 
 | Constant | Type | Value | Description |
@@ -138,10 +150,11 @@ This crate is the **semver stability boundary**. Breaking changes bump `ABI_VERS
 | `Timeout` | Execution exceeded wall-clock limit |
 | `Unavailable` | Plugin is draining (hot-reload in progress) |
 
-### Host API Functions (WASM imports)
+### Exported Functions
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
+| `kind` | `(&self) -> EventKind` | Get the discriminant kind of a PluginEvent |
 | `host_kv_get` | `extern "C" fn(key_ptr: i32, key_len: i32) -> i32` | Scoped KV read |
 | `host_kv_set` | `extern "C" fn(key_ptr: i32, key_len: i32, val_ptr: i32, val_len: i32) -> i32` | Scoped KV write |
 | `host_http_get` | `extern "C" fn(url_ptr: i32, url_len: i32) -> i32` | Allowlisted HTTP GET |
