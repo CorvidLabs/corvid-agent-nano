@@ -48,10 +48,7 @@ pub async fn list_plugins(registry: &PluginRegistry) -> ListResponse {
 /// Tool discovery is currently based on manifest data. Full WASM-based
 /// tool schema extraction will be added when per-plugin Store instances
 /// are fully integrated.
-pub async fn list_tools(
-    registry: &PluginRegistry,
-    plugin_id: Option<&str>,
-) -> ToolsResponse {
+pub async fn list_tools(registry: &PluginRegistry, plugin_id: Option<&str>) -> ToolsResponse {
     let manifests = registry.list_manifests().await;
     let tools = Vec::new();
 

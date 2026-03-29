@@ -29,7 +29,7 @@ impl SandboxLimits {
         match tier {
             TrustTier::Trusted => Self {
                 memory_bytes: 128 * 1024 * 1024, // 128 MB
-                fuel_per_call: 1_000_000_000,     // 1B instructions
+                fuel_per_call: 1_000_000_000,    // 1B instructions
                 timeout: Duration::from_secs(30),
                 network_allowed: true,
                 db_read_allowed: true,
@@ -38,7 +38,7 @@ impl SandboxLimits {
             },
             TrustTier::Verified => Self {
                 memory_bytes: 32 * 1024 * 1024, // 32 MB
-                fuel_per_call: 100_000_000,      // 100M instructions
+                fuel_per_call: 100_000_000,     // 100M instructions
                 timeout: Duration::from_secs(5),
                 network_allowed: true, // read-only, allowlist
                 db_read_allowed: true,
@@ -47,7 +47,7 @@ impl SandboxLimits {
             },
             TrustTier::Untrusted => Self {
                 memory_bytes: 4 * 1024 * 1024, // 4 MB
-                fuel_per_call: 10_000_000,      // 10M instructions
+                fuel_per_call: 10_000_000,     // 10M instructions
                 timeout: Duration::from_secs(1),
                 network_allowed: false,
                 db_read_allowed: false,
@@ -77,7 +77,8 @@ pub fn is_ssrf_blocked(url: &str) -> bool {
 }
 
 fn extract_host(url: &str) -> Option<&str> {
-    let after_scheme = url.strip_prefix("http://")
+    let after_scheme = url
+        .strip_prefix("http://")
         .or_else(|| url.strip_prefix("https://"))?;
     // Host is everything up to the first / or end
     let host_port = after_scheme.split('/').next().unwrap_or(after_scheme);
@@ -121,16 +122,30 @@ fn is_blocked_host(host_with_port: &str) -> bool {
 
     if parts.len() == 4 {
         let (a, b) = (parts[0], parts[1]);
-        if a == 127 { return true; }           // 127.0.0.0/8
-        if a == 10 { return true; }            // 10.0.0.0/8
-        if a == 172 && (16..=31).contains(&b) { return true; } // 172.16.0.0/12
-        if a == 192 && b == 168 { return true; } // 192.168.0.0/16
-        if a == 169 && b == 254 { return true; } // 169.254.0.0/16
+        if a == 127 {
+            return true;
+        } // 127.0.0.0/8
+        if a == 10 {
+            return true;
+        } // 10.0.0.0/8
+        if a == 172 && (16..=31).contains(&b) {
+            return true;
+        } // 172.16.0.0/12
+        if a == 192 && b == 168 {
+            return true;
+        } // 192.168.0.0/16
+        if a == 169 && b == 254 {
+            return true;
+        } // 169.254.0.0/16
     }
 
     // IPv6 blocked patterns
-    if host_lower == "::1" { return true; }
-    if host_lower.starts_with("fd00:") { return true; }
+    if host_lower == "::1" {
+        return true;
+    }
+    if host_lower.starts_with("fd00:") {
+        return true;
+    }
 
     false
 }

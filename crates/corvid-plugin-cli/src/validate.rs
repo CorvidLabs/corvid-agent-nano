@@ -7,9 +7,7 @@ use std::fmt;
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use corvid_plugin_sdk::{
-    Capability, PluginManifest, TrustTier, ABI_MIN_COMPATIBLE, ABI_VERSION,
-};
+use corvid_plugin_sdk::{Capability, PluginManifest, TrustTier, ABI_MIN_COMPATIBLE, ABI_VERSION};
 
 /// Result of validating a plugin.
 #[derive(Debug)]
@@ -140,7 +138,10 @@ fn extract_and_validate(wasm_bytes: &[u8], report: &mut ValidationReport) -> Res
             report.checks.push(Check {
                 name: "ABI version".into(),
                 passed: true,
-                detail: format!("compatible (host range [{}, {}])", ABI_MIN_COMPATIBLE, ABI_VERSION),
+                detail: format!(
+                    "compatible (host range [{}, {}])",
+                    ABI_MIN_COMPATIBLE, ABI_VERSION
+                ),
             });
 
             validate_manifest_fields(&loaded.manifest, report);
@@ -251,9 +252,9 @@ fn validate_capabilities_for_tier(
 
     // Untrusted plugins cannot have Network or FsProjectDir
     if tier == TrustTier::Untrusted {
-        let has_restricted = capabilities.iter().any(|c| {
-            matches!(c, Capability::Network { .. } | Capability::FsProjectDir)
-        });
+        let has_restricted = capabilities
+            .iter()
+            .any(|c| matches!(c, Capability::Network { .. } | Capability::FsProjectDir));
 
         report.checks.push(Check {
             name: "Tier capability check".into(),
@@ -425,7 +426,11 @@ sdk-version = "^0.1"
 
         let report = validate_plugin_toml(&path).unwrap();
         // ID format check should fail
-        let id_check = report.checks.iter().find(|c| c.name == "ID format").unwrap();
+        let id_check = report
+            .checks
+            .iter()
+            .find(|c| c.name == "ID format")
+            .unwrap();
         assert!(!id_check.passed);
     }
 
@@ -445,7 +450,11 @@ sdk-version = "^0.1"
             TrustTier::Untrusted,
             &mut report,
         );
-        let tier_check = report.checks.iter().find(|c| c.name == "Tier capability check").unwrap();
+        let tier_check = report
+            .checks
+            .iter()
+            .find(|c| c.name == "Tier capability check")
+            .unwrap();
         assert!(!tier_check.passed);
     }
 
@@ -464,7 +473,11 @@ sdk-version = "^0.1"
             TrustTier::Verified,
             &mut report,
         );
-        let tier_check = report.checks.iter().find(|c| c.name == "Tier capability check").unwrap();
+        let tier_check = report
+            .checks
+            .iter()
+            .find(|c| c.name == "Tier capability check")
+            .unwrap();
         assert!(tier_check.passed);
     }
 
@@ -483,8 +496,16 @@ sdk-version = "^0.1"
             }),
             abi_version: Some(1),
             checks: vec![
-                Check { name: "ABI".into(), passed: true, detail: "v1".into() },
-                Check { name: "ID".into(), passed: true, detail: "test-plugin".into() },
+                Check {
+                    name: "ABI".into(),
+                    passed: true,
+                    detail: "v1".into(),
+                },
+                Check {
+                    name: "ID".into(),
+                    passed: true,
+                    detail: "test-plugin".into(),
+                },
             ],
         };
 

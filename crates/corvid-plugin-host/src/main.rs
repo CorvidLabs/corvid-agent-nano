@@ -17,7 +17,10 @@ use corvid_plugin_host::engine::build_engine;
 use corvid_plugin_host::registry::PluginRegistry;
 
 #[derive(Parser, Debug)]
-#[command(name = "corvid-plugin-host", about = "WASM plugin host for corvid-agent")]
+#[command(
+    name = "corvid-plugin-host",
+    about = "WASM plugin host for corvid-agent"
+)]
 struct Cli {
     /// Base directory for socket, cache, plugin storage.
     #[arg(long, default_value = "~/.corvid")]
@@ -63,10 +66,7 @@ struct ServerState {
     start_time: Instant,
 }
 
-async fn handle_request(
-    state: &ServerState,
-    req: JsonRpcRequest,
-) -> JsonRpcResponse {
+async fn handle_request(state: &ServerState, req: JsonRpcRequest) -> JsonRpcResponse {
     let result = match req.method.as_str() {
         "plugin.list" => {
             let manifests = state.registry.list_manifests().await;
@@ -219,12 +219,12 @@ async fn main() -> Result<()> {
     let data_dir = shellexpand(&cli.data_dir);
     let socket_path = cli
         .socket_path
-        .map(|p| PathBuf::from(p))
+        .map(PathBuf::from)
         .unwrap_or_else(|| data_dir.join("plugins.sock"));
 
     let cache_dir = cli
         .cache_dir
-        .map(|p| PathBuf::from(p))
+        .map(PathBuf::from)
         .unwrap_or_else(|| data_dir.join("cache").join("plugins").join(&cli.agent_id));
 
     // Check for existing socket (another instance running)

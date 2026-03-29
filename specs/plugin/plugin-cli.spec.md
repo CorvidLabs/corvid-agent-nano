@@ -3,9 +3,9 @@ module: plugin-cli
 version: 1
 status: active
 files:
-  - corvid-plugin-cli/src/main.rs
-  - corvid-plugin-cli/src/scaffold.rs
-  - corvid-plugin-cli/src/validate.rs
+  - crates/corvid-plugin-cli/src/main.rs
+  - crates/corvid-plugin-cli/src/scaffold.rs
+  - crates/corvid-plugin-cli/src/validate.rs
 depends_on:
   - specs/plugin/plugin-sdk.spec.md
   - specs/plugin/plugin-host.spec.md

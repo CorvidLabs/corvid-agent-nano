@@ -21,9 +21,9 @@ pub fn validate_url(url: &str, allowlist: &[String]) -> bool {
     };
 
     // Check against allowlist
-    allowlist.iter().any(|allowed| {
-        host == *allowed || host.ends_with(&format!(".{allowed}"))
-    })
+    allowlist
+        .iter()
+        .any(|allowed| host == *allowed || host.ends_with(&format!(".{allowed}")))
 }
 
 fn extract_host_from_url(url: &str) -> Option<String> {
@@ -38,20 +38,33 @@ fn extract_host_from_url(url: &str) -> Option<String> {
 /// Link HTTP host functions into the WASM linker.
 pub fn link(linker: &mut Linker<PluginState>) -> anyhow::Result<()> {
     // host_http_get(url_ptr, url_len) -> ptr to msgpack response
-    linker.func_wrap("env", "host_http_get", |_caller: wasmtime::Caller<'_, PluginState>, _url_ptr: i32, _url_len: i32| -> i32 {
-        // Full implementation will:
-        // 1. Read URL from WASM memory
-        // 2. Validate against allowlist + SSRF
-        // 3. Make HTTP GET request
-        // 4. Write msgpack response to WASM memory
-        // 5. Return pointer to response
-        0 // placeholder
-    })?;
+    linker.func_wrap(
+        "env",
+        "host_http_get",
+        |_caller: wasmtime::Caller<'_, PluginState>, _url_ptr: i32, _url_len: i32| -> i32 {
+            // Full implementation will:
+            // 1. Read URL from WASM memory
+            // 2. Validate against allowlist + SSRF
+            // 3. Make HTTP GET request
+            // 4. Write msgpack response to WASM memory
+            // 5. Return pointer to response
+            0 // placeholder
+        },
+    )?;
 
     // host_http_post(url_ptr, url_len, body_ptr, body_len) -> ptr
-    linker.func_wrap("env", "host_http_post", |_caller: wasmtime::Caller<'_, PluginState>, _url_ptr: i32, _url_len: i32, _body_ptr: i32, _body_len: i32| -> i32 {
-        0 // placeholder
-    })?;
+    linker.func_wrap(
+        "env",
+        "host_http_post",
+        |_caller: wasmtime::Caller<'_, PluginState>,
+         _url_ptr: i32,
+         _url_len: i32,
+         _body_ptr: i32,
+         _body_len: i32|
+         -> i32 {
+            0 // placeholder
+        },
+    )?;
 
     Ok(())
 }

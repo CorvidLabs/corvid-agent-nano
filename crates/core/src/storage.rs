@@ -18,9 +18,7 @@ fn map_db_err(e: rusqlite::Error) -> AlgoChatError {
 }
 
 /// Acquires the database mutex, converting a poison error into StorageFailed.
-fn lock_db(
-    mutex: &Mutex<Connection>,
-) -> algochat::Result<std::sync::MutexGuard<'_, Connection>> {
+fn lock_db(mutex: &Mutex<Connection>) -> algochat::Result<std::sync::MutexGuard<'_, Connection>> {
     mutex
         .lock()
         .map_err(|e| AlgoChatError::StorageFailed(format!("Database lock poisoned: {e}")))

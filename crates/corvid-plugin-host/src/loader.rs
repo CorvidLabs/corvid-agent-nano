@@ -93,16 +93,18 @@ pub fn validate_manifest(m: &PluginManifest) -> Result<(), LoadError> {
 }
 
 /// Step 1: Extract and verify ABI version from a compiled WASM module.
-pub fn check_abi_version(instance: &Instance, store: &mut Store<PluginState>) -> Result<u32, LoadError> {
+pub fn check_abi_version(
+    instance: &Instance,
+    store: &mut Store<PluginState>,
+) -> Result<u32, LoadError> {
     let abi_fn = instance
         .get_typed_func::<(), i32>(&mut *store, "__corvid_abi_version")
-        .map_err(|_| {
-            LoadError::Wasm("missing export: __corvid_abi_version".into())
-        })?;
+        .map_err(|_| LoadError::Wasm("missing export: __corvid_abi_version".into()))?;
 
-    let version = abi_fn.call(&mut *store, ()).map_err(|e| {
-        LoadError::Wasm(format!("__corvid_abi_version call failed: {e}"))
-    })? as u32;
+    let version = abi_fn
+        .call(&mut *store, ())
+        .map_err(|e| LoadError::Wasm(format!("__corvid_abi_version call failed: {e}")))?
+        as u32;
 
     if version < ABI_MIN_COMPATIBLE || version > ABI_VERSION {
         return Err(LoadError::AbiMismatch {
@@ -140,9 +142,9 @@ pub fn extract_manifest(
         .get_typed_func::<(), i32>(&mut *store, "__corvid_manifest")
         .map_err(|_| LoadError::Wasm("missing export: __corvid_manifest".into()))?;
 
-    let ptr = manifest_fn.call(&mut *store, ()).map_err(|e| {
-        LoadError::Wasm(format!("__corvid_manifest call failed: {e}"))
-    })?;
+    let ptr = manifest_fn
+        .call(&mut *store, ())
+        .map_err(|e| LoadError::Wasm(format!("__corvid_manifest call failed: {e}")))?;
 
     // Read length prefix (4 bytes LE) then MessagePack payload from WASM memory
     let memory = instance
@@ -163,9 +165,8 @@ pub fn extract_manifest(
     }
 
     let manifest_bytes = &data[ptr + 4..ptr + 4 + len];
-    let manifest: PluginManifest = rmp_serde::from_slice(manifest_bytes).map_err(|e| {
-        LoadError::ManifestInvalid(format!("failed to deserialize manifest: {e}"))
-    })?;
+    let manifest: PluginManifest = rmp_serde::from_slice(manifest_bytes)
+        .map_err(|e| LoadError::ManifestInvalid(format!("failed to deserialize manifest: {e}")))?;
 
     validate_manifest(&manifest)?;
 
@@ -173,14 +174,9 @@ pub fn extract_manifest(
 }
 
 /// Full 4-step load sequence.
-pub fn load_plugin(
-    engine: &Engine,
-    wasm_bytes: &[u8],
-    tier: TrustTier,
-) -> Result<LoadedPlugin> {
+pub fn load_plugin(engine: &Engine, wasm_bytes: &[u8], tier: TrustTier) -> Result<LoadedPlugin> {
     let limits = SandboxLimits::for_tier(tier);
-    let module = Module::new(engine, wasm_bytes)
-        .context("failed to compile WASM module")?;
+    let module = Module::new(engine, wasm_bytes).context("failed to compile WASM module")?;
 
     // Step 2: Signature (before manifest for Trusted)
     verify_signature(wasm_bytes, tier).map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -202,12 +198,10 @@ pub fn load_plugin(
         .context("failed to instantiate WASM for manifest extraction")?;
 
     // Step 1: ABI check
-    let _abi = check_abi_version(&instance, &mut store)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let _abi = check_abi_version(&instance, &mut store).map_err(|e| anyhow::anyhow!("{e}"))?;
 
     // Step 3: Manifest extraction + validation
-    let manifest = extract_manifest(&instance, &mut store)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let manifest = extract_manifest(&instance, &mut store).map_err(|e| anyhow::anyhow!("{e}"))?;
 
     Ok(LoadedPlugin {
         manifest,

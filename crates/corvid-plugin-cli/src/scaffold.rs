@@ -21,8 +21,7 @@ pub fn scaffold(name: &str, author: &str, tier: TrustTier) -> Result<PathBuf> {
         bail!("directory '{dir_name}' already exists");
     }
 
-    fs::create_dir_all(dir.join("src"))
-        .context("failed to create project directory")?;
+    fs::create_dir_all(dir.join("src")).context("failed to create project directory")?;
     fs::create_dir_all(dir.join(".github/workflows"))
         .context("failed to create .github/workflows")?;
 
@@ -201,10 +200,22 @@ pub fn scaffold_in(parent: &Path, name: &str, author: &str, tier: TrustTier) -> 
         TrustTier::Untrusted => "Untrusted",
     };
 
-    fs::write(dir.join("Cargo.toml"), generate_cargo_toml(name, &crate_name))?;
-    fs::write(dir.join("plugin.toml"), generate_plugin_toml(name, &crate_name, tier_str))?;
-    fs::write(dir.join("src/lib.rs"), generate_lib_rs(name, author, tier_str))?;
-    fs::write(dir.join(".github/workflows/release.yml"), generate_release_yml(name, &crate_name))?;
+    fs::write(
+        dir.join("Cargo.toml"),
+        generate_cargo_toml(name, &crate_name),
+    )?;
+    fs::write(
+        dir.join("plugin.toml"),
+        generate_plugin_toml(name, &crate_name, tier_str),
+    )?;
+    fs::write(
+        dir.join("src/lib.rs"),
+        generate_lib_rs(name, author, tier_str),
+    )?;
+    fs::write(
+        dir.join(".github/workflows/release.yml"),
+        generate_release_yml(name, &crate_name),
+    )?;
 
     Ok(dir)
 }
@@ -217,7 +228,13 @@ mod tests {
     #[test]
     fn scaffold_creates_expected_structure() {
         let tmp = TempDir::new().unwrap();
-        let dir = scaffold_in(tmp.path(), "algo-watcher", "CorvidLabs", TrustTier::Verified).unwrap();
+        let dir = scaffold_in(
+            tmp.path(),
+            "algo-watcher",
+            "CorvidLabs",
+            TrustTier::Verified,
+        )
+        .unwrap();
 
         assert!(dir.join("Cargo.toml").exists());
         assert!(dir.join("plugin.toml").exists());

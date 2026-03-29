@@ -279,7 +279,7 @@ pub fn corvid_tool(attr: TokenStream, item: TokenStream) -> TokenStream {
     let attr_str = attr.to_string();
     let name = extract_attr_value(&attr_str, "name")
         .unwrap_or_else(|| struct_name.to_string().to_lowercase());
-    let description = extract_attr_value(&attr_str, "description").unwrap_or_else(|| String::new());
+    let description = extract_attr_value(&attr_str, "description").unwrap_or_default();
 
     let expanded = quote! {
         #input
@@ -312,10 +312,10 @@ pub fn corvid_tool(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 /// Extract `key = "value"` from a comma-separated attribute string.
 fn extract_attr_value(attrs: &str, key: &str) -> Option<String> {
-    let search = format!("{key}");
+    let search = key;
     for part in attrs.split(',') {
         let part = part.trim();
-        if let Some(rest) = part.strip_prefix(&search) {
+        if let Some(rest) = part.strip_prefix(search) {
             let rest = rest.trim().strip_prefix('=')?;
             let rest = rest.trim();
             // Strip surrounding quotes

@@ -2,7 +2,7 @@
 //!
 //! Subcommands: new, validate, install, list, uninstall.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
@@ -165,7 +165,7 @@ fn parse_source(source: &str) -> Result<(&str, &str, &str)> {
 }
 
 /// Install a plugin from GitHub release.
-async fn cmd_install(source: &str, data_dir: &PathBuf, socket_path: &PathBuf) -> Result<()> {
+async fn cmd_install(source: &str, data_dir: &Path, socket_path: &Path) -> Result<()> {
     let (owner, repo, version) = parse_source(source)?;
     let tag = format!("v{version}");
 
@@ -174,9 +174,8 @@ async fn cmd_install(source: &str, data_dir: &PathBuf, socket_path: &PathBuf) ->
     let client = reqwest::Client::new();
 
     // Step 1: Fetch plugin.toml from release assets
-    let plugin_toml_url = format!(
-        "https://github.com/{owner}/{repo}/releases/download/{tag}/plugin.toml"
-    );
+    let plugin_toml_url =
+        format!("https://github.com/{owner}/{repo}/releases/download/{tag}/plugin.toml");
 
     let plugin_toml_resp = client
         .get(&plugin_toml_url)
@@ -192,8 +191,8 @@ async fn cmd_install(source: &str, data_dir: &PathBuf, socket_path: &PathBuf) ->
     }
 
     let plugin_toml_text = plugin_toml_resp.text().await?;
-    let plugin_toml: toml::Value = toml::from_str(&plugin_toml_text)
-        .context("failed to parse plugin.toml")?;
+    let plugin_toml: toml::Value =
+        toml::from_str(&plugin_toml_text).context("failed to parse plugin.toml")?;
 
     let plugin_section = plugin_toml
         .get("plugin")
@@ -219,9 +218,8 @@ async fn cmd_install(source: &str, data_dir: &PathBuf, socket_path: &PathBuf) ->
         .context("plugin.toml missing [build].wasm-artifact")?;
 
     // Step 2: Download .wasm artifact
-    let wasm_url = format!(
-        "https://github.com/{owner}/{repo}/releases/download/{tag}/{wasm_artifact}"
-    );
+    let wasm_url =
+        format!("https://github.com/{owner}/{repo}/releases/download/{tag}/{wasm_artifact}");
 
     println!("Downloading {wasm_artifact}...");
     let wasm_resp = client
@@ -293,8 +291,7 @@ async fn cmd_install(source: &str, data_dir: &PathBuf, socket_path: &PathBuf) ->
     };
 
     let db_path = data_dir.join("corvid-agent.db");
-    let db = rusqlite::Connection::open(&db_path)
-        .context("failed to open plugin database")?;
+    let db = rusqlite::Connection::open(&db_path).context("failed to open plugin database")?;
 
     db.execute_batch(
         "CREATE TABLE IF NOT EXISTS plugins (
@@ -304,7 +301,7 @@ async fn cmd_install(source: &str, data_dir: &PathBuf, socket_path: &PathBuf) ->
             wasm_hash    TEXT NOT NULL,
             installed_at INTEGER NOT NULL,
             enabled      INTEGER NOT NULL DEFAULT 1
-        )"
+        )",
     )?;
 
     // Check for existing installation
@@ -348,9 +345,9 @@ async fn cmd_install(source: &str, data_dir: &PathBuf, socket_path: &PathBuf) ->
 
 /// Send JSON-RPC reload signal to the running plugin host.
 async fn signal_host_reload(
-    socket_path: &PathBuf,
+    socket_path: &Path,
     plugin_id: &str,
-    wasm_path: &PathBuf,
+    wasm_path: &Path,
     tier: &str,
 ) -> Result<()> {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -386,7 +383,7 @@ async fn signal_host_reload(
 }
 
 /// List installed plugins.
-async fn cmd_list(data_dir: &PathBuf, json: bool, socket_path: &PathBuf) -> Result<()> {
+async fn cmd_list(data_dir: &Path, json: bool, socket_path: &Path) -> Result<()> {
     // First try querying the running host
     if socket_path.exists() {
         match query_host_list(socket_path).await {
@@ -397,15 +394,14 @@ async fn cmd_list(data_dir: &PathBuf, json: bool, socket_path: &PathBuf) -> Resu
                     if manifests.is_empty() {
                         println!("No plugins loaded");
                     } else {
-                        println!("{:<30} {:<12} {:<12} {}", "ID", "VERSION", "TIER", "STATUS");
+                        println!("{:<30} {:<12} {:<12} STATUS", "ID", "VERSION", "TIER");
                         println!("{}", "-".repeat(70));
                         for m in &manifests {
                             println!(
-                                "{:<30} {:<12} {:<12} {}",
+                                "{:<30} {:<12} {:<12} active",
                                 m.get("id").and_then(|v| v.as_str()).unwrap_or("?"),
                                 m.get("version").and_then(|v| v.as_str()).unwrap_or("?"),
                                 m.get("trust_tier").and_then(|v| v.as_str()).unwrap_or("?"),
-                                "active"
                             );
                         }
                     }
@@ -427,9 +423,7 @@ async fn cmd_list(data_dir: &PathBuf, json: bool, socket_path: &PathBuf) -> Resu
 
     let db = rusqlite::Connection::open(&db_path)?;
 
-    let mut stmt = db.prepare(
-        "SELECT id, version, tier, enabled FROM plugins ORDER BY id"
-    )?;
+    let mut stmt = db.prepare("SELECT id, version, tier, enabled FROM plugins ORDER BY id")?;
 
     let rows: Vec<(String, String, String, bool)> = stmt
         .query_map([], |row| {
@@ -458,7 +452,7 @@ async fn cmd_list(data_dir: &PathBuf, json: bool, socket_path: &PathBuf) -> Resu
     } else if rows.is_empty() {
         println!("No plugins installed");
     } else {
-        println!("{:<30} {:<12} {:<12} {}", "ID", "VERSION", "TIER", "ENABLED");
+        println!("{:<30} {:<12} {:<12} ENABLED", "ID", "VERSION", "TIER");
         println!("{}", "-".repeat(70));
         for (id, ver, tier, enabled) in &rows {
             println!(
@@ -475,7 +469,7 @@ async fn cmd_list(data_dir: &PathBuf, json: bool, socket_path: &PathBuf) -> Resu
 }
 
 /// Query the running plugin host for loaded manifests.
-async fn query_host_list(socket_path: &PathBuf) -> Result<Vec<serde_json::Value>> {
+async fn query_host_list(socket_path: &Path) -> Result<Vec<serde_json::Value>> {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::UnixStream;
 
@@ -507,7 +501,7 @@ async fn query_host_list(socket_path: &PathBuf) -> Result<Vec<serde_json::Value>
 }
 
 /// Remove an installed plugin.
-async fn cmd_uninstall(plugin_id: &str, data_dir: &PathBuf, socket_path: &PathBuf) -> Result<()> {
+async fn cmd_uninstall(plugin_id: &str, data_dir: &Path, socket_path: &Path) -> Result<()> {
     let db_path = data_dir.join("corvid-agent.db");
     if !db_path.exists() {
         bail!("no plugins installed (database not found)");
@@ -561,7 +555,7 @@ async fn cmd_uninstall(plugin_id: &str, data_dir: &PathBuf, socket_path: &PathBu
 }
 
 /// Send JSON-RPC unload signal to the running plugin host.
-async fn signal_host_unload(socket_path: &PathBuf, plugin_id: &str) -> Result<()> {
+async fn signal_host_unload(socket_path: &Path, plugin_id: &str) -> Result<()> {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::UnixStream;
 
@@ -596,7 +590,8 @@ mod tests {
 
     #[test]
     fn parse_source_valid() {
-        let (owner, repo, version) = parse_source("CorvidLabs/corvid-plugin-algo-oracle@0.3.1").unwrap();
+        let (owner, repo, version) =
+            parse_source("CorvidLabs/corvid-plugin-algo-oracle@0.3.1").unwrap();
         assert_eq!(owner, "CorvidLabs");
         assert_eq!(repo, "corvid-plugin-algo-oracle");
         assert_eq!(version, "0.3.1");

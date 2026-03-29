@@ -63,6 +63,11 @@ mod tests {
     fn link_empty_capabilities() {
         let engine = wasmtime::Engine::default();
         let mut linker = Linker::new(&engine);
-        assert!(link_host_functions(&mut linker, &[], &SandboxLimits::for_tier(corvid_plugin_sdk::TrustTier::Untrusted)).is_ok());
+        assert!(link_host_functions(
+            &mut linker,
+            &[],
+            &SandboxLimits::for_tier(corvid_plugin_sdk::TrustTier::Untrusted)
+        )
+        .is_ok());
     }
 }

@@ -57,10 +57,7 @@ pub async fn dispatch_event(registry: &PluginRegistry, event: &PluginEvent) {
 }
 
 /// Dispatch an event and return the count of plugins that received it.
-pub async fn dispatch_event_counted(
-    registry: &PluginRegistry,
-    event: &PluginEvent,
-) -> usize {
+pub async fn dispatch_event_counted(registry: &PluginRegistry, event: &PluginEvent) -> usize {
     let event_kind = event.kind();
     let manifests = registry.list_manifests().await;
     let mut count = 0;
