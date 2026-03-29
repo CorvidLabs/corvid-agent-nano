@@ -1,4 +1,4 @@
-//! Corvid Agent Nano — lightweight Rust AlgoChat agent.
+//! Corvid Agent CAN — lightweight Rust AlgoChat agent.
 //!
 //! Subcommands: init, import, run, contacts, change-password, info
 
@@ -8,18 +8,22 @@ use std::sync::Arc;
 use anyhow::{bail, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use ed25519_dalek::SigningKey;
-use tracing::info;
+use tracing::{info, warn};
 use zeroize::Zeroize;
 
 use algochat::{AlgoChat, AlgoChatConfig, AlgorandConfig};
-use corvid_core::storage::{SqliteKeyStorage, SqliteMessageCache};
 
 mod agent;
 mod algorand;
+mod bridge;
 mod contacts;
 mod keystore;
+mod sidecar;
+mod storage;
 mod transaction;
 mod wallet;
+
+use storage::{SqliteKeyStorage, SqliteMessageCache};
 
 use algorand::{HttpAlgodClient, HttpIndexerClient};
 use contacts::ContactStore;
@@ -88,8 +92,8 @@ impl Network {
 
 #[derive(Parser)]
 #[command(
-    name = "nano",
-    about = "Corvid Agent Nano — lightweight Rust AlgoChat agent"
+    name = "can",
+    about = "Corvid Agent CAN — lightweight Rust AlgoChat agent"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -105,12 +109,12 @@ enum Command {
     /// Generate a new wallet and save it encrypted
     Init {
         /// Algorand network preset
-        #[arg(long, default_value = "localnet", env = "NANO_NETWORK")]
+        #[arg(long, default_value = "localnet", env = "CAN_NETWORK")]
         network: Network,
 
         /// Password for keystore encryption (min 8 chars).
         /// If not provided, prompts interactively.
-        #[arg(long, env = "NANO_PASSWORD")]
+        #[arg(long, env = "CAN_PASSWORD")]
         password: Option<String>,
     },
 
@@ -125,46 +129,46 @@ enum Command {
         seed: Option<String>,
 
         /// Password for keystore encryption
-        #[arg(long, env = "NANO_PASSWORD")]
+        #[arg(long, env = "CAN_PASSWORD")]
         password: Option<String>,
     },
 
     /// Start the agent and listen for AlgoChat messages
     Run {
         /// Algorand network preset
-        #[arg(long, default_value = "localnet", env = "NANO_NETWORK")]
+        #[arg(long, default_value = "localnet", env = "CAN_NETWORK")]
         network: Network,
 
         /// Override: Algorand node URL
-        #[arg(long, env = "NANO_ALGOD_URL")]
+        #[arg(long, env = "CAN_ALGOD_URL")]
         algod_url: Option<String>,
 
         /// Override: Algorand node token
-        #[arg(long, env = "NANO_ALGOD_TOKEN")]
+        #[arg(long, env = "CAN_ALGOD_TOKEN")]
         algod_token: Option<String>,
 
         /// Override: Algorand indexer URL
-        #[arg(long, env = "NANO_INDEXER_URL")]
+        #[arg(long, env = "CAN_INDEXER_URL")]
         indexer_url: Option<String>,
 
         /// Override: Algorand indexer token
-        #[arg(long, env = "NANO_INDEXER_TOKEN")]
+        #[arg(long, env = "CAN_INDEXER_TOKEN")]
         indexer_token: Option<String>,
 
         /// Agent seed (hex). If not provided, loads from keystore.
-        #[arg(long, env = "NANO_SEED")]
+        #[arg(long, env = "CAN_SEED")]
         seed: Option<String>,
 
         /// Agent Algorand address. Required if --seed is provided.
-        #[arg(long, env = "NANO_ADDRESS")]
+        #[arg(long, env = "CAN_ADDRESS")]
         address: Option<String>,
 
         /// Keystore password (for loading from keystore)
-        #[arg(long, env = "NANO_PASSWORD")]
+        #[arg(long, env = "CAN_PASSWORD")]
         password: Option<String>,
 
         /// Agent name for discovery
-        #[arg(long, default_value = "nano")]
+        #[arg(long, default_value = "can")]
         name: String,
 
         /// corvid-agent hub URL
@@ -174,6 +178,10 @@ enum Command {
         /// Poll interval in seconds
         #[arg(long, default_value = "5")]
         poll_interval: u64,
+
+        /// Disable the plugin host sidecar
+        #[arg(long, default_value = "false")]
+        no_plugins: bool,
     },
 
     /// Manage contacts
@@ -185,7 +193,7 @@ enum Command {
     /// Change the keystore password
     ChangePassword {
         /// Current password
-        #[arg(long, env = "NANO_PASSWORD")]
+        #[arg(long, env = "CAN_PASSWORD")]
         old_password: Option<String>,
 
         /// New password
@@ -195,6 +203,50 @@ enum Command {
 
     /// Show agent identity and status
     Info,
+
+    /// Manage plugins
+    Plugin {
+        #[command(subcommand)]
+        action: PluginAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum PluginAction {
+    /// List loaded plugins
+    List,
+
+    /// Invoke a plugin tool
+    Invoke {
+        /// Plugin ID (e.g. hello-world)
+        plugin_id: String,
+
+        /// Tool name (e.g. hello)
+        tool: String,
+
+        /// JSON input (e.g. '{"name": "World"}')
+        #[arg(default_value = "{}")]
+        input: String,
+    },
+
+    /// Load a plugin from a WASM file
+    Load {
+        /// Path to the .wasm file
+        path: String,
+
+        /// Trust tier: trusted, verified, untrusted
+        #[arg(long, default_value = "untrusted")]
+        tier: String,
+    },
+
+    /// Unload a plugin by ID
+    Unload {
+        /// Plugin ID
+        plugin_id: String,
+    },
+
+    /// Check plugin host health
+    Health,
 }
 
 #[derive(Subcommand)]
@@ -306,7 +358,7 @@ fn load_identity(
     // Load from keystore
     let ks_path = keystore_path(data_dir);
     if !keystore::keystore_exists(&ks_path) {
-        bail!("No wallet found. Run `nano init` to create one, or provide --seed/--address.");
+        bail!("No wallet found. Run `can init` to create one, or provide --seed/--address.");
     }
 
     let pw = match password {
@@ -329,7 +381,7 @@ fn cmd_init(network: Network, password: Option<String>, data_dir: &str) -> Resul
     let ks_path = keystore_path(data_dir);
     if keystore::keystore_exists(&ks_path) {
         bail!(
-            "Wallet already exists at {}. Delete it first or use `nano import`.",
+            "Wallet already exists at {}. Delete it first or use `can import`.",
             ks_path.display()
         );
     }
@@ -377,15 +429,15 @@ fn cmd_init(network: Network, password: Option<String>, data_dir: &str) -> Resul
             println!("\nFund your agent:");
             println!("  Send ALGO to: {}", address);
             println!("  Testnet dispenser: https://bank.testnet.algorand.network");
-            println!("\nOnce funded, run: nano run --network testnet");
+            println!("\nOnce funded, run: can run --network testnet");
         }
         Network::Mainnet => {
             println!("\nFund your agent:");
             println!("  Send ALGO to: {}", address);
-            println!("\nOnce funded, run: nano run --network mainnet");
+            println!("\nOnce funded, run: can run --network mainnet");
         }
         Network::Localnet => {
-            println!("\nRun your agent: nano run --network localnet");
+            println!("\nRun your agent: can run --network localnet");
         }
     }
 
@@ -457,6 +509,7 @@ async fn cmd_run(
     name: String,
     hub_url: String,
     poll_interval: u64,
+    no_plugins: bool,
     data_dir: &str,
 ) -> Result<()> {
     // Resolve network config
@@ -569,6 +622,78 @@ async fn cmd_run(
 
     let client = Arc::new(client);
 
+    // ── Plugin host sidecar ──────────────────────────────────────────
+    let sidecar_handle = if no_plugins {
+        info!("plugin host disabled (--no-plugins)");
+        None
+    } else {
+        match sidecar::find_plugin_host_binary() {
+            Some(binary) => {
+                // Ensure plugins directory exists
+                let plugins_dir = data_path.join("plugins");
+                std::fs::create_dir_all(&plugins_dir)?;
+
+                let config = sidecar::SidecarConfig {
+                    binary: binary.clone(),
+                    data_dir: data_path.to_path_buf(),
+                    agent_id: agent_address.clone(),
+                    log_level: "info".to_string(),
+                };
+
+                let handle = sidecar::spawn_sidecar(config);
+
+                // Wait for socket to become available
+                let socket_path = sidecar::SidecarHandle::socket_path(data_path);
+                if sidecar::wait_for_socket(&socket_path, std::time::Duration::from_secs(10)).await
+                {
+                    // Connect the bridge to the plugin host
+                    let plugin_bridge = bridge::PluginBridge::new(&socket_path);
+                    match plugin_bridge.connect().await {
+                        Ok(()) => {
+                            // Quick health check + plugin count
+                            let plugin_count = match plugin_bridge.list_plugins().await {
+                                Ok(list) => {
+                                    for p in &list {
+                                        info!(id = %p.id, version = %p.version, "plugin loaded");
+                                    }
+                                    list.len()
+                                }
+                                Err(_) => 0,
+                            };
+                            info!(
+                                binary = %binary.display(),
+                                socket = %socket_path.display(),
+                                plugins = plugin_count,
+                                "plugin host sidecar ready"
+                            );
+                            println!(
+                                "  Plugins:  active ({} loaded)",
+                                plugin_count
+                            );
+                        }
+                        Err(e) => {
+                            warn!(error = %e, "plugin host socket ready but bridge connect failed");
+                            println!("  Plugins:  active (bridge error)");
+                        }
+                    }
+                } else {
+                    warn!(
+                        socket = %socket_path.display(),
+                        "plugin host sidecar started but socket not ready after 10s"
+                    );
+                    println!("  Plugins:  starting...");
+                }
+
+                Some(handle)
+            }
+            None => {
+                info!("corvid-plugin-host binary not found — plugins disabled");
+                println!("  Plugins:  disabled (binary not found)");
+                None
+            }
+        }
+    };
+
     let algod_for_tx = Arc::new(HttpAlgodClient::new(&algod_url, &algod_token));
 
     let loop_client = Arc::clone(&client);
@@ -585,7 +710,7 @@ async fn cmd_run(
         agent::run_message_loop(loop_client, loop_algod, loop_config).await;
     });
 
-    info!("nano agent ready — listening for AlgoChat messages");
+    info!("can agent ready — listening for AlgoChat messages");
 
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {
@@ -597,6 +722,13 @@ async fn cmd_run(
                 Err(e) => tracing::error!(error = %e, "message loop panicked"),
             }
         }
+    }
+
+    // Shut down plugin host sidecar
+    if let Some(handle) = sidecar_handle {
+        info!("stopping plugin host sidecar");
+        handle.shutdown().await;
+        info!("plugin host sidecar stopped");
     }
 
     Ok(())
@@ -612,7 +744,7 @@ fn cmd_contacts(action: ContactsAction, data_dir: &str) -> Result<()> {
         ContactsAction::List => {
             let contacts = store.list()?;
             if contacts.is_empty() {
-                println!("No contacts. Add one with: nano contacts add --name <name> --address <addr> --psk <key>");
+                println!("No contacts. Add one with: can contacts add --name <name> --address <addr> --psk <key>");
                 return Ok(());
             }
             println!("{:<16} {:<60} ADDED", "NAME", "ADDRESS");
@@ -676,7 +808,7 @@ fn cmd_change_password(
 ) -> Result<()> {
     let ks_path = keystore_path(data_dir);
     if !keystore::keystore_exists(&ks_path) {
-        bail!("No wallet found. Run `nano init` first.");
+        bail!("No wallet found. Run `can init` first.");
     }
 
     let old_pw = match old_password {
@@ -708,12 +840,12 @@ fn cmd_info(data_dir: &str) -> Result<()> {
 
     if !keystore::keystore_exists(&ks_path) {
         println!("No wallet configured.");
-        println!("Run `nano init` to create a new wallet.");
+        println!("Run `can init` to create a new wallet.");
         return Ok(());
     }
 
     let address = keystore::keystore_address(&ks_path)?;
-    println!("Corvid Agent Nano");
+    println!("Corvid Agent CAN");
     println!("  Wallet:   {}", ks_path.display());
     println!("  Address:  {}", address);
 
@@ -724,6 +856,90 @@ fn cmd_info(data_dir: &str) -> Result<()> {
         println!("  Contacts: {}", store.count()?);
     } else {
         println!("  Contacts: 0");
+    }
+
+    Ok(())
+}
+
+async fn cmd_plugin(action: PluginAction, data_dir: &str) -> Result<()> {
+    let data_path = std::path::Path::new(data_dir);
+    let socket_path = sidecar::SidecarHandle::socket_path(data_path);
+
+    let bridge = bridge::PluginBridge::new(&socket_path);
+
+    if let Err(e) = bridge.connect().await {
+        eprintln!(
+            "Cannot connect to plugin host at {}\n\
+             Is the agent running? (can run)\n\
+             Error: {}",
+            socket_path.display(),
+            e
+        );
+        std::process::exit(1);
+    }
+
+    match action {
+        PluginAction::List => {
+            let plugins = bridge.list_plugins().await?;
+            if plugins.is_empty() {
+                println!("No plugins loaded.");
+                println!("Place .wasm files in {}/plugins/ and restart.", data_dir);
+                return Ok(());
+            }
+            println!("{:<20} {:<10} {:<12} DESCRIPTION", "ID", "VERSION", "TIER");
+            println!("{}", "-".repeat(70));
+            for p in &plugins {
+                println!(
+                    "{:<20} {:<10} {:<12} {}",
+                    p.id, p.version, p.trust_tier, p.description
+                );
+            }
+            println!("\n{} plugin(s) loaded", plugins.len());
+        }
+
+        PluginAction::Invoke {
+            plugin_id,
+            tool,
+            input,
+        } => {
+            let input_value: serde_json::Value = serde_json::from_str(&input)
+                .map_err(|e| anyhow::anyhow!("Invalid JSON input: {e}"))?;
+
+            let result = bridge.invoke(&plugin_id, &tool, input_value).await?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
+        }
+
+        PluginAction::Load { path, tier } => {
+            // Resolve to absolute path
+            let abs_path = std::fs::canonicalize(&path)
+                .map_err(|e| anyhow::anyhow!("Cannot find file '{}': {}", path, e))?;
+
+            let result = bridge
+                .load_plugin(&abs_path.display().to_string(), &tier)
+                .await?;
+            println!("Loaded: {}", serde_json::to_string_pretty(&result)?);
+        }
+
+        PluginAction::Unload { plugin_id } => {
+            bridge.unload_plugin(&plugin_id).await?;
+            println!("Unloaded plugin: {}", plugin_id);
+        }
+
+        PluginAction::Health => {
+            let status = bridge.health().await?;
+            println!("Plugin Host Health");
+            println!("  Uptime: {:.1}s", status.uptime_ms as f64 / 1000.0);
+            if let Some(plugins) = status.plugins.as_object() {
+                if plugins.is_empty() {
+                    println!("  Plugins: none loaded");
+                } else {
+                    println!("  Plugins:");
+                    for (id, state) in plugins {
+                        println!("    {}: {}", id, state);
+                    }
+                }
+            }
+        }
     }
 
     Ok(())
@@ -765,6 +981,7 @@ async fn main() -> Result<()> {
             name,
             hub_url,
             poll_interval,
+            no_plugins,
         } => {
             cmd_run(
                 network,
@@ -778,6 +995,7 @@ async fn main() -> Result<()> {
                 name,
                 hub_url,
                 poll_interval,
+                no_plugins,
                 data_dir,
             )
             .await
@@ -791,5 +1009,7 @@ async fn main() -> Result<()> {
         } => cmd_change_password(old_password, new_password, data_dir),
 
         Command::Info => cmd_info(data_dir),
+
+        Command::Plugin { action } => cmd_plugin(action, data_dir).await,
     }
 }

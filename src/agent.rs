@@ -31,7 +31,7 @@ impl Default for AgentLoopConfig {
         Self {
             poll_interval_secs: 5,
             hub_url: "http://localhost:3578".to_string(),
-            agent_name: "nano".to_string(),
+            agent_name: "can".to_string(),
             agent_address: String::new(),
             signing_key: SigningKey::from_bytes(&[0u8; 32]),
         }
@@ -359,7 +359,7 @@ mod tests {
         let config = AgentLoopConfig::default();
         assert_eq!(config.poll_interval_secs, 5);
         assert_eq!(config.hub_url, "http://localhost:3578");
-        assert_eq!(config.agent_name, "nano");
+        assert_eq!(config.agent_name, "can");
     }
 
     #[test]

@@ -3,7 +3,6 @@ module: plugin-cli
 version: 1
 status: active
 files:
-  - crates/corvid-plugin-cli/src/lib.rs
   - crates/corvid-plugin-cli/src/main.rs
   - crates/corvid-plugin-cli/src/scaffold.rs
   - crates/corvid-plugin-cli/src/validate.rs
@@ -30,30 +29,12 @@ Command-line tool for plugin authors and operators. Scaffolds new plugin project
 | `list` | `[--json]` | List installed plugins (queries running host via socket) |
 | `uninstall` | `<plugin-id>` | Remove an installed plugin |
 
-### Exported Modules
-
-| Module | Description |
-|--------|-------------|
-| `scaffold` | Template generation for new plugin projects |
-| `validate` | Manifest and capability validation |
-
-### Exported Structs
-
-| Struct | Description |
-|--------|-------------|
-| `ValidationReport` | Validation result: manifest, ABI version, and list of checks |
-| `Check` | Single validation check result: name, passed, and detail message |
-
 ### Exported Functions
 
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
 | `scaffold` | `(name: &str, author: &str, tier: TrustTier)` | `Result<PathBuf>` | Generate plugin project directory from template |
-| `scaffold_in` | `(parent: &Path, name: &str, author: &str, tier: TrustTier)` | `Result<PathBuf>` | Generate plugin project in a specific parent directory |
 | `validate_plugin` | `(wasm_path: &Path)` | `Result<ValidationReport>` | Full validation: ABI, manifest, capabilities, tool schemas |
-| `validate_plugin_toml` | `(toml_path: &Path)` | `Result<ValidationReport>` | Validate a plugin.toml manifest file offline |
-| `is_ok` | `(&self)` | `bool` | Check if all validation checks passed |
-| `error_count` | `(&self)` | `usize` | Count the number of failed validation checks |
 
 ## Modules
 
