@@ -1,6 +1,6 @@
 //! Corvid Agent CAN — lightweight Rust AlgoChat agent.
 //!
-//! Subcommands: init, import, run, send, inbox, status, contacts, groups, change-password, info
+//! Subcommands: setup (init), import, run, send, inbox, status, contacts, groups, change-password, info, fund, register
 
 use std::fmt;
 use std::sync::Arc;
@@ -23,6 +23,7 @@ mod sidecar;
 mod storage;
 mod transaction;
 mod wallet;
+mod wizard;
 
 use storage::{SqliteKeyStorage, SqliteMessageCache};
 
@@ -108,11 +109,24 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Generate a new wallet and save it encrypted
-    Init {
-        /// Algorand network preset
-        #[arg(long, default_value = "localnet", env = "CAN_NETWORK")]
-        network: Network,
+    /// Interactive setup wizard — generate or import a wallet with guided prompts
+    #[command(alias = "init")]
+    Setup {
+        /// Algorand network preset (skips interactive prompt)
+        #[arg(long, env = "CAN_NETWORK")]
+        network: Option<Network>,
+
+        /// Generate a new wallet (non-interactive mode)
+        #[arg(long, conflicts_with_all = ["mnemonic", "seed"])]
+        generate: bool,
+
+        /// Import from 25-word Algorand mnemonic
+        #[arg(long, conflicts_with_all = ["generate", "seed"])]
+        mnemonic: Option<String>,
+
+        /// Import from hex-encoded 32-byte Ed25519 seed
+        #[arg(long, conflicts_with_all = ["generate", "mnemonic"])]
+        seed: Option<String>,
 
         /// Password for keystore encryption (min 8 chars).
         /// If not provided, prompts interactively.
@@ -551,75 +565,7 @@ fn load_identity(
 // Command handlers
 // ---------------------------------------------------------------------------
 
-fn cmd_init(network: Network, password: Option<String>, data_dir: &str) -> Result<()> {
-    let data_path = std::path::Path::new(data_dir);
-    std::fs::create_dir_all(data_path)?;
-
-    let ks_path = keystore_path(data_dir);
-    if keystore::keystore_exists(&ks_path) {
-        bail!(
-            "Wallet already exists at {}. Delete it first or use `can import`.",
-            ks_path.display()
-        );
-    }
-
-    // Generate wallet
-    let mut seed = wallet::generate_seed();
-    let address = wallet::address_from_seed(&seed);
-    let mnemonic = wallet::seed_to_mnemonic(&seed);
-
-    println!("\nGenerated new Algorand wallet");
-    println!("  Network: {}", network);
-    println!("  Address: {}\n", address);
-
-    println!("IMPORTANT: Write down your recovery phrase and store it safely.");
-    println!("---");
-    let words: Vec<&str> = mnemonic.split_whitespace().collect();
-    for (i, word) in words.iter().enumerate() {
-        print!("{:>2}. {:<12}", i + 1, word);
-        if (i + 1) % 5 == 0 {
-            println!();
-        }
-    }
-    println!("---\n");
-
-    // Get password
-    let pw = match password {
-        Some(p) => {
-            if p.len() < 8 {
-                bail!("Password must be at least 8 characters");
-            }
-            p
-        }
-        None => prompt_new_password()?,
-    };
-
-    // Encrypt and save
-    keystore::create_keystore(&seed, &address, &pw, &ks_path)?;
-    seed.zeroize();
-
-    println!("\nWallet encrypted and saved to {}", ks_path.display());
-
-    // Network-specific funding instructions
-    match network {
-        Network::Testnet => {
-            println!("\nFund your agent:");
-            println!("  Send ALGO to: {}", address);
-            println!("  Testnet dispenser: https://bank.testnet.algorand.network");
-            println!("\nOnce funded, run: can run --network testnet");
-        }
-        Network::Mainnet => {
-            println!("\nFund your agent:");
-            println!("  Send ALGO to: {}", address);
-            println!("\nOnce funded, run: can run --network mainnet");
-        }
-        Network::Localnet => {
-            println!("\nRun your agent: can run --network localnet");
-        }
-    }
-
-    Ok(())
-}
+// cmd_init replaced by wizard::run_wizard — see src/wizard.rs
 
 fn cmd_import(
     mnemonic: Option<String>,
@@ -690,6 +636,11 @@ async fn cmd_run(
     no_hub: bool,
     data_dir: &str,
 ) -> Result<()> {
+    // First-run check: if no keystore and no seed flag, guide the user
+    if seed_hex.is_none() && !wizard::check_first_run(data_dir) {
+        bail!("Agent not set up. Run `can setup` (or `can init`) to create a wallet first.");
+    }
+
     // Resolve network config
     let net = network.defaults();
     let algod_url = algod_url.unwrap_or(net.algod_url);
@@ -1755,7 +1706,24 @@ async fn main() -> Result<()> {
     let data_dir = &cli.data_dir;
 
     match cli.command {
-        Command::Init { network, password } => cmd_init(network, password, data_dir),
+        Command::Setup {
+            network,
+            generate,
+            mnemonic,
+            seed,
+            password,
+        } => {
+            let config = wizard::WizardConfig {
+                network,
+                generate,
+                import_mnemonic: mnemonic,
+                import_seed: seed,
+                password,
+                data_dir: data_dir.to_string(),
+            };
+            wizard::run_wizard(config)?;
+            Ok(())
+        }
 
         Command::Import {
             mnemonic,
