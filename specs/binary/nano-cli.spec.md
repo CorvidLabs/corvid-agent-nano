@@ -10,6 +10,7 @@ files:
 depends_on:
   - specs/core/core.spec.md
   - specs/binary/transaction.spec.md
+  - CorvidLabs/rs-algochat@algochat
 ---
 
 # Nano CLI
