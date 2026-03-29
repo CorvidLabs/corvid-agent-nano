@@ -4,7 +4,8 @@ version: 1
 status: active
 files:
   - src/transaction.rs
-depends_on: []
+depends_on:
+  - CorvidLabs/rs-algochat@algochat
 ---
 
 # Transaction Building

@@ -93,4 +93,10 @@ specs/
     algochat.spec.md               — AlgoChat protocol client + listener
   binary/
     nano-cli.spec.md               — CLI binary entry point
+  plugin/
+    plugin-sdk.spec.md             — Plugin SDK: traits, types, capabilities (crates.io contract)
+    plugin-macros.spec.md          — Proc-macro: #[corvid_plugin] WASM export glue
+    plugin-host.spec.md            — Sidecar binary: Wasmtime, sandbox, hot-reload
+    plugin-cli.spec.md             — CLI tool: scaffold, validate, install
+    plugin-bridge.spec.md          — TypeScript bridge: Unix socket client, auto-registration
 ```

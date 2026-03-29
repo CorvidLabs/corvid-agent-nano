@@ -8,7 +8,8 @@ files:
   - crates/core/src/message.rs
   - crates/core/src/config.rs
   - crates/core/src/storage.rs
-depends_on: []
+depends_on:
+  - CorvidLabs/rs-algochat@algochat
 ---
 
 # Core Types

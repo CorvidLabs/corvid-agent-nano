@@ -17,6 +17,13 @@ fn map_db_err(e: rusqlite::Error) -> AlgoChatError {
     AlgoChatError::StorageFailed(format!("SQLite error: {e}"))
 }
 
+/// Acquires the database mutex, converting a poison error into StorageFailed.
+fn lock_db(mutex: &Mutex<Connection>) -> algochat::Result<std::sync::MutexGuard<'_, Connection>> {
+    mutex
+        .lock()
+        .map_err(|e| AlgoChatError::StorageFailed(format!("Database lock poisoned: {e}")))
+}
+
 // ============================================================================
 // SQLite Key Storage
 // ============================================================================
@@ -52,7 +59,7 @@ impl SqliteKeyStorage {
     }
 
     fn init_tables(&self) -> algochat::Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_db(&self.conn)?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS encryption_keys (
                 address TEXT PRIMARY KEY,
@@ -72,7 +79,7 @@ impl EncryptionKeyStorage for SqliteKeyStorage {
         address: &str,
         _require_biometric: bool,
     ) -> algochat::Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_db(&self.conn)?;
         conn.execute(
             "INSERT OR REPLACE INTO encryption_keys (address, private_key) VALUES (?1, ?2)",
             params![address, private_key.as_slice()],
@@ -82,7 +89,7 @@ impl EncryptionKeyStorage for SqliteKeyStorage {
     }
 
     async fn retrieve(&self, address: &str) -> algochat::Result<[u8; 32]> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_db(&self.conn)?;
         let key_bytes: Vec<u8> = conn
             .query_row(
                 "SELECT private_key FROM encryption_keys WHERE address = ?1",
@@ -102,7 +109,9 @@ impl EncryptionKeyStorage for SqliteKeyStorage {
     }
 
     async fn has_key(&self, address: &str) -> bool {
-        let conn = self.conn.lock().unwrap();
+        let Ok(conn) = lock_db(&self.conn) else {
+            return false;
+        };
         conn.query_row(
             "SELECT 1 FROM encryption_keys WHERE address = ?1",
             params![address],
@@ -112,7 +121,7 @@ impl EncryptionKeyStorage for SqliteKeyStorage {
     }
 
     async fn delete(&self, address: &str) -> algochat::Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_db(&self.conn)?;
         conn.execute(
             "DELETE FROM encryption_keys WHERE address = ?1",
             params![address],
@@ -122,7 +131,7 @@ impl EncryptionKeyStorage for SqliteKeyStorage {
     }
 
     async fn list_stored_addresses(&self) -> algochat::Result<Vec<String>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_db(&self.conn)?;
         let mut stmt = conn
             .prepare("SELECT address FROM encryption_keys")
             .map_err(map_db_err)?;
@@ -169,7 +178,7 @@ impl SqliteMessageCache {
     }
 
     fn init_tables(&self) -> algochat::Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_db(&self.conn)?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS messages (
                 id TEXT PRIMARY KEY,
@@ -236,7 +245,7 @@ impl SqliteMessageCache {
 #[async_trait::async_trait]
 impl MessageCache for SqliteMessageCache {
     async fn store(&self, messages: &[Message], participant: &str) -> algochat::Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_db(&self.conn)?;
         for msg in messages {
             let direction_str = match msg.direction {
                 MessageDirection::Sent => "sent",
@@ -276,7 +285,7 @@ impl MessageCache for SqliteMessageCache {
         participant: &str,
         after_round: Option<u64>,
     ) -> algochat::Result<Vec<Message>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_db(&self.conn)?;
         let (query, round_param): (&str, Option<u64>) = match after_round {
             Some(round) => (
                 "SELECT id, participant, sender, recipient, content, timestamp_secs,
@@ -313,7 +322,7 @@ impl MessageCache for SqliteMessageCache {
     }
 
     async fn get_last_sync_round(&self, participant: &str) -> algochat::Result<Option<u64>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_db(&self.conn)?;
         match conn.query_row(
             "SELECT last_round FROM sync_rounds WHERE participant = ?1",
             params![participant],
@@ -326,7 +335,7 @@ impl MessageCache for SqliteMessageCache {
     }
 
     async fn set_last_sync_round(&self, round: u64, participant: &str) -> algochat::Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_db(&self.conn)?;
         conn.execute(
             "INSERT OR REPLACE INTO sync_rounds (participant, last_round) VALUES (?1, ?2)",
             params![participant, round],
@@ -336,7 +345,7 @@ impl MessageCache for SqliteMessageCache {
     }
 
     async fn get_cached_conversations(&self) -> algochat::Result<Vec<String>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_db(&self.conn)?;
         let mut stmt = conn
             .prepare("SELECT DISTINCT participant FROM messages")
             .map_err(map_db_err)?;
@@ -349,14 +358,14 @@ impl MessageCache for SqliteMessageCache {
     }
 
     async fn clear(&self) -> algochat::Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_db(&self.conn)?;
         conn.execute_batch("DELETE FROM messages; DELETE FROM sync_rounds;")
             .map_err(map_db_err)?;
         Ok(())
     }
 
     async fn clear_for(&self, participant: &str) -> algochat::Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_db(&self.conn)?;
         conn.execute(
             "DELETE FROM messages WHERE participant = ?1",
             params![participant],

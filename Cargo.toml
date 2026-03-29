@@ -34,6 +34,14 @@ dialoguer = "0.11"
 zeroize = { version = "1", features = ["derive"] }
 base64 = "0.22"
 chrono = "0.4"
+thiserror = "1"
+wasmtime = { version = "22", features = ["cache", "cranelift"] }
+scopeguard = "1"
+regex = "1"
+semver = "1"
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full", "extra-traits"] }
 
 [package]
 name = "corvid-agent-nano"
