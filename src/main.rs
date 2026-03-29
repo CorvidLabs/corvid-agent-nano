@@ -1,6 +1,6 @@
 //! Corvid Agent CAN — lightweight Rust AlgoChat agent.
 //!
-//! Subcommands: init, import, run, contacts, change-password, info
+//! Subcommands: init, import, run, send, inbox, contacts, change-password, info
 
 use std::fmt;
 use std::sync::Arc;
@@ -182,6 +182,60 @@ enum Command {
         /// Disable the plugin host sidecar
         #[arg(long, default_value = "false")]
         no_plugins: bool,
+    },
+
+    /// Send an encrypted message to a contact or address
+    Send {
+        /// Recipient: contact name or Algorand address
+        #[arg(long)]
+        to: String,
+
+        /// Message text to send
+        #[arg(long)]
+        message: String,
+
+        /// Algorand network preset
+        #[arg(long, default_value = "localnet", env = "CAN_NETWORK")]
+        network: Network,
+
+        /// Override: Algorand node URL
+        #[arg(long, env = "CAN_ALGOD_URL")]
+        algod_url: Option<String>,
+
+        /// Override: Algorand node token
+        #[arg(long, env = "CAN_ALGOD_TOKEN")]
+        algod_token: Option<String>,
+
+        /// Override: Algorand indexer URL
+        #[arg(long, env = "CAN_INDEXER_URL")]
+        indexer_url: Option<String>,
+
+        /// Override: Algorand indexer token
+        #[arg(long, env = "CAN_INDEXER_TOKEN")]
+        indexer_token: Option<String>,
+
+        /// Agent seed (hex). If not provided, loads from keystore.
+        #[arg(long, env = "CAN_SEED")]
+        seed: Option<String>,
+
+        /// Agent Algorand address. Required if --seed is provided.
+        #[arg(long, env = "CAN_ADDRESS")]
+        address: Option<String>,
+
+        /// Keystore password (for loading from keystore)
+        #[arg(long, env = "CAN_PASSWORD")]
+        password: Option<String>,
+    },
+
+    /// Read cached messages from the local inbox
+    Inbox {
+        /// Filter by sender: contact name or Algorand address
+        #[arg(long)]
+        from: Option<String>,
+
+        /// Maximum number of messages to display
+        #[arg(long, default_value = "20")]
+        limit: usize,
     },
 
     /// Manage contacts
@@ -861,6 +915,273 @@ fn cmd_info(data_dir: &str) -> Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
+async fn cmd_send(
+    to: String,
+    message: String,
+    network: Network,
+    algod_url: Option<String>,
+    algod_token: Option<String>,
+    indexer_url: Option<String>,
+    indexer_token: Option<String>,
+    seed_hex: Option<String>,
+    address: Option<String>,
+    password: Option<String>,
+    data_dir: &str,
+) -> Result<()> {
+    // Resolve network config
+    let net = network.defaults();
+    let algod_url = algod_url.unwrap_or(net.algod_url);
+    let algod_token = algod_token.unwrap_or(net.algod_token);
+    let indexer_url = indexer_url.unwrap_or(net.indexer_url);
+    let indexer_token = indexer_token.unwrap_or(net.indexer_token);
+
+    // Load identity
+    let (seed, agent_address) = load_identity(
+        seed_hex.as_deref(),
+        address.as_deref(),
+        password.as_deref(),
+        data_dir,
+    )?;
+
+    let signing_key = SigningKey::from_bytes(&seed);
+
+    // Ensure data directory exists
+    let data_path = std::path::Path::new(data_dir);
+    std::fs::create_dir_all(data_path)?;
+
+    // Build Algorand clients
+    let algod = HttpAlgodClient::new(&algod_url, &algod_token);
+    let indexer = HttpIndexerClient::new(&indexer_url, &indexer_token);
+
+    let algo_config =
+        AlgorandConfig::new(&algod_url, &algod_token).with_indexer(&indexer_url, &indexer_token);
+    let config = AlgoChatConfig::new(algo_config);
+
+    // Initialize persistent SQLite storage
+    let key_storage = SqliteKeyStorage::open(data_path.join("keys.db"))
+        .map_err(|e| anyhow::anyhow!("Failed to open key storage: {}", e))?;
+    let message_cache = SqliteMessageCache::open(data_path.join("messages.db"))
+        .map_err(|e| anyhow::anyhow!("Failed to open message cache: {}", e))?;
+
+    // Initialize AlgoChat client
+    let client = AlgoChat::from_seed(
+        &seed,
+        &agent_address,
+        config,
+        algod,
+        indexer,
+        key_storage,
+        message_cache,
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("Failed to initialize AlgoChat: {}", e))?;
+
+    // Load contacts and register PSKs
+    let contacts_path = contacts_db_path(data_dir);
+    let contact_store = if contacts_path.exists() {
+        Some(ContactStore::open(&contacts_path)?)
+    } else {
+        None
+    };
+
+    if let Some(store) = &contact_store {
+        let contacts = store.list()?;
+        for contact in &contacts {
+            let mut psk = [0u8; 32];
+            psk.copy_from_slice(&contact.psk);
+            let _ = client
+                .add_psk_contact(&contact.address, &psk, Some(contact.name.clone()))
+                .await;
+        }
+    }
+
+    // Resolve recipient: try as contact name first, then as raw address
+    let recipient_address = if let Some(store) = &contact_store {
+        if let Some(contact) = store.get(&to)? {
+            info!(name = %to, address = %contact.address, "resolved contact");
+            contact.address
+        } else if let Some(contact) = store.get_by_address(&to)? {
+            info!(name = %contact.name, address = %to, "matched contact by address");
+            to.clone()
+        } else {
+            // Validate as raw Algorand address
+            wallet::decode_address(&to)?;
+            to.clone()
+        }
+    } else {
+        wallet::decode_address(&to)?;
+        to.clone()
+    };
+
+    // Build a separate algod client for transaction submission
+    let algod_for_tx = HttpAlgodClient::new(&algod_url, &algod_token);
+
+    // Encrypt and send
+    let txid = agent::send_reply(
+        &client,
+        &algod_for_tx,
+        &agent_address,
+        &recipient_address,
+        &message,
+        &signing_key,
+    )
+    .await?;
+
+    println!("Message sent!");
+    println!("  To:   {}", recipient_address);
+    println!("  TxID: {}", txid);
+    println!("  Size: {} chars", message.len());
+
+    Ok(())
+}
+
+fn cmd_inbox(from: Option<String>, limit: usize, data_dir: &str) -> Result<()> {
+    let data_path = std::path::Path::new(data_dir);
+    let messages_db = data_path.join("messages.db");
+
+    if !messages_db.exists() {
+        println!("No messages yet. Run `can run` to start receiving messages.");
+        return Ok(());
+    }
+
+    // Open message cache directly (no async needed for reads)
+    let conn = rusqlite::Connection::open(&messages_db)?;
+
+    // Load contacts for name resolution
+    let contacts_path = contacts_db_path(data_dir);
+    let contact_store = if contacts_path.exists() {
+        Some(ContactStore::open(&contacts_path)?)
+    } else {
+        None
+    };
+
+    // Resolve --from filter to an address if it's a contact name
+    let from_address = if let Some(ref from_str) = from {
+        if let Some(store) = &contact_store {
+            if let Some(contact) = store.get(from_str)? {
+                Some(contact.address)
+            } else {
+                Some(from_str.clone())
+            }
+        } else {
+            Some(from_str.clone())
+        }
+    } else {
+        None
+    };
+
+    // Query messages
+    let (query, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
+        if let Some(ref addr) = from_address {
+            (
+                format!(
+                    "SELECT id, participant, sender, recipient, content, timestamp_secs, \
+                     confirmed_round, direction, reply_to_id, reply_to_preview \
+                     FROM messages WHERE participant = ?1 \
+                     ORDER BY timestamp_secs DESC LIMIT ?2"
+                ),
+                vec![
+                    Box::new(addr.clone()) as Box<dyn rusqlite::types::ToSql>,
+                    Box::new(limit as i64),
+                ],
+            )
+        } else {
+            (
+                format!(
+                    "SELECT id, participant, sender, recipient, content, timestamp_secs, \
+                     confirmed_round, direction, reply_to_id, reply_to_preview \
+                     FROM messages \
+                     ORDER BY timestamp_secs DESC LIMIT ?1"
+                ),
+                vec![Box::new(limit as i64) as Box<dyn rusqlite::types::ToSql>],
+            )
+        };
+
+    let mut stmt = conn.prepare(&query)?;
+    let params_refs: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|p| &**p).collect();
+    let rows = stmt.query_map(params_refs.as_slice(), |row| {
+        let sender: String = row.get(2)?;
+        let recipient: String = row.get(3)?;
+        let content: String = row.get(4)?;
+        let timestamp_secs: i64 = row.get(5)?;
+        let confirmed_round: u64 = row.get(6)?;
+        let direction: String = row.get(7)?;
+        Ok((
+            sender,
+            recipient,
+            content,
+            timestamp_secs,
+            confirmed_round,
+            direction,
+        ))
+    })?;
+
+    let mut messages: Vec<_> = rows.collect::<std::result::Result<Vec<_>, _>>()?;
+
+    if messages.is_empty() {
+        if let Some(ref f) = from {
+            println!("No messages from {}.", f);
+        } else {
+            println!("Inbox is empty. Run `can run` to start receiving messages.");
+        }
+        return Ok(());
+    }
+
+    // Reverse so oldest is first (we queried DESC for limit, display ASC)
+    messages.reverse();
+
+    // Helper to resolve address to contact name
+    let resolve_name = |addr: &str| -> String {
+        if let Some(store) = &contact_store {
+            if let Ok(Some(contact)) = store.get_by_address(addr) {
+                return contact.name;
+            }
+        }
+        // Truncate address for display
+        if addr.len() > 12 {
+            format!("{}...", &addr[..12])
+        } else {
+            addr.to_string()
+        }
+    };
+
+    println!(
+        "{:<5} {:<8} {:<16} {:<20} MESSAGE",
+        "ROUND", "DIR", "FROM/TO", "TIME"
+    );
+    println!("{}", "-".repeat(80));
+
+    for (sender, recipient, content, timestamp_secs, confirmed_round, direction) in &messages {
+        let dir_label = if direction == "sent" { ">>>" } else { "<<<" };
+        let peer = if direction == "sent" {
+            resolve_name(recipient)
+        } else {
+            resolve_name(sender)
+        };
+
+        // Format timestamp
+        let time_str = chrono::DateTime::from_timestamp(*timestamp_secs, 0)
+            .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+
+        // Truncate content for display
+        let display_content = if content.len() > 60 {
+            format!("{}...", &content[..57])
+        } else {
+            content.clone()
+        };
+
+        println!(
+            "{:<5} {:<8} {:<16} {:<20} {}",
+            confirmed_round, dir_label, peer, time_str, display_content
+        );
+    }
+
+    println!("\n{} message(s)", messages.len());
+    Ok(())
+}
+
 async fn cmd_plugin(action: PluginAction, data_dir: &str) -> Result<()> {
     let data_path = std::path::Path::new(data_dir);
     let socket_path = sidecar::SidecarHandle::socket_path(data_path);
@@ -1000,6 +1321,36 @@ async fn main() -> Result<()> {
             )
             .await
         }
+
+        Command::Send {
+            to,
+            message,
+            network,
+            algod_url,
+            algod_token,
+            indexer_url,
+            indexer_token,
+            seed,
+            address,
+            password,
+        } => {
+            cmd_send(
+                to,
+                message,
+                network,
+                algod_url,
+                algod_token,
+                indexer_url,
+                indexer_token,
+                seed,
+                address,
+                password,
+                data_dir,
+            )
+            .await
+        }
+
+        Command::Inbox { from, limit } => cmd_inbox(from, limit, data_dir),
 
         Command::Contacts { action } => cmd_contacts(action, data_dir),
 
