@@ -1,0 +1,16 @@
+[book]
+title = "corvid-agent-nano"
+description = "Lightweight Rust CLI agent for AlgoChat on Algorand"
+authors = ["CorvidLabs"]
+language = "en"
+src = "src"
+
+[output.html]
+default-theme = "navy"
+preferred-dark-theme = "navy"
+git-repository-url = "https://github.com/CorvidLabs/corvid-agent-nano"
+edit-url-template = "https://github.com/CorvidLabs/corvid-agent-nano/edit/main/docs/{path}"
+
+[output.html.fold]
+enable = true
+level = 1

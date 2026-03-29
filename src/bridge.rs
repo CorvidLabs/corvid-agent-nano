@@ -89,11 +89,7 @@ impl PluginBridge {
     }
 
     /// Send a JSON-RPC request and read the response.
-    async fn call(
-        &self,
-        method: &str,
-        params: serde_json::Value,
-    ) -> Result<serde_json::Value> {
+    async fn call(&self, method: &str, params: serde_json::Value) -> Result<serde_json::Value> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let req = JsonRpcRequest {
             method: method.to_string(),
@@ -190,7 +186,6 @@ impl PluginBridge {
         let status: HealthStatus = serde_json::from_value(result)?;
         Ok(status)
     }
-
 }
 
 #[cfg(test)]

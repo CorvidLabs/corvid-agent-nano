@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use anyhow::{bail, Result};
 use clap::{Parser, Subcommand, ValueEnum};
+use colored::Colorize;
 use ed25519_dalek::SigningKey;
 use tracing::{info, warn};
 use zeroize::Zeroize;
@@ -22,6 +23,7 @@ mod keystore;
 mod sidecar;
 mod storage;
 mod transaction;
+mod ui;
 mod wallet;
 mod wizard;
 
@@ -645,8 +647,8 @@ fn cmd_import(
     };
 
     let address = wallet::address_from_seed(&seed);
-    println!("Imported wallet");
-    println!("  Address: {}", address);
+    ui::success("Wallet imported");
+    ui::field("Address:", &address);
 
     let pw = match password {
         Some(p) => {
@@ -661,7 +663,10 @@ fn cmd_import(
     keystore::create_keystore(&seed, &address, &pw, &ks_path)?;
     seed.zeroize();
 
-    println!("Wallet encrypted and saved to {}", ks_path.display());
+    ui::success(&format!(
+        "Wallet encrypted and saved to {}",
+        ks_path.display()
+    ));
     Ok(())
 }
 
@@ -702,7 +707,11 @@ async fn cmd_run(
         data_dir,
     )?;
 
-    let effective_hub = if no_hub { "disabled (P2P mode)".to_string() } else { hub_url.clone() };
+    let effective_hub = if no_hub {
+        "disabled (P2P mode)".to_string()
+    } else {
+        hub_url.clone()
+    };
 
     info!(
         name = %name,
@@ -823,7 +832,7 @@ async fn cmd_run(
     let pub_key = hex::encode(client.encryption_public_key());
     info!(
         address = %agent_address,
-        encryption_key = %pub_key,
+        encryption_key_prefix = %&pub_key[..16],
         "identity initialized"
     );
 
@@ -832,13 +841,17 @@ async fn cmd_run(
         .as_ref()
         .map(|s| s.count().unwrap_or(0))
         .unwrap_or(0);
-    println!("\n  Agent:    {}", name);
-    println!("  Network:  {}", network);
-    println!("  Address:  {}", agent_address);
-    println!("  Enc Key:  {}", &pub_key[..16]);
-    println!("  Contacts: {}", contact_count);
-    println!("  Groups:   {}", group_count);
-    println!("  Hub:      {}\n", effective_hub);
+    println!();
+    ui::header("Corvid Agent CAN");
+    ui::separator(50);
+    ui::field("Agent:", &name);
+    ui::field("Network:", &network.to_string());
+    ui::field("Address:", &agent_address);
+    ui::field("Enc Key:", &pub_key[..16]);
+    ui::field("Contacts:", &contact_count.to_string());
+    ui::field("Groups:", &group_count.to_string());
+    ui::field("Hub:", &effective_hub);
+    ui::separator(50);
 
     let client = Arc::new(client);
 
@@ -886,14 +899,14 @@ async fn cmd_run(
                                 plugins = plugin_count,
                                 "plugin host sidecar ready"
                             );
-                            println!(
-                                "  Plugins:  active ({} loaded)",
-                                plugin_count
+                            ui::field(
+                                "Plugins:",
+                                &format!("{}", format!("active ({} loaded)", plugin_count).green()),
                             );
                         }
                         Err(e) => {
                             warn!(error = %e, "plugin host socket ready but bridge connect failed");
-                            println!("  Plugins:  active (bridge error)");
+                            ui::field("Plugins:", &format!("{}", "active (bridge error)".yellow()));
                         }
                     }
                 } else {
@@ -901,14 +914,14 @@ async fn cmd_run(
                         socket = %socket_path.display(),
                         "plugin host sidecar started but socket not ready after 10s"
                     );
-                    println!("  Plugins:  starting...");
+                    ui::field("Plugins:", &format!("{}", "starting...".yellow()));
                 }
 
                 Some(handle)
             }
             None => {
                 info!("corvid-plugin-host binary not found — plugins disabled");
-                println!("  Plugins:  disabled (binary not found)");
+                ui::field("Plugins:", &format!("{}", "disabled".dimmed()));
                 None
             }
         }
@@ -964,15 +977,21 @@ fn cmd_contacts(action: ContactsAction, data_dir: &str) -> Result<()> {
         ContactsAction::List => {
             let contacts = store.list()?;
             if contacts.is_empty() {
-                println!("No contacts. Add one with: can contacts add --name <name> --address <addr> --psk <key>");
+                ui::warn("No contacts. Add one with: can contacts add --name <name> --address <addr> --psk <key>");
                 return Ok(());
             }
-            println!("{:<16} {:<60} ADDED", "NAME", "ADDRESS");
-            println!("{}", "-".repeat(90));
+            ui::header("Contacts");
+            ui::table_header(&format!("{:<16} {:<60} ADDED", "NAME", "ADDRESS"));
+            ui::separator(90);
             for c in &contacts {
-                println!("{:<16} {:<60} {}", c.name, c.address, c.added_at);
+                println!(
+                    "  {:<16} {:<60} {}",
+                    c.name.bright_white(),
+                    c.address.dimmed(),
+                    c.added_at.dimmed()
+                );
             }
-            println!("\n{} contact(s)", contacts.len());
+            println!("\n  {} contact(s)", contacts.len().to_string().cyan());
         }
 
         ContactsAction::Add {
@@ -990,14 +1009,14 @@ fn cmd_contacts(action: ContactsAction, data_dir: &str) -> Result<()> {
             } else {
                 store.add(&name, &address, &psk_bytes)?;
             }
-            println!("Added contact: {} ({})", name, address);
+            ui::success(&format!("Added contact: {} ({})", name.bold(), address));
         }
 
         ContactsAction::Remove { name } => {
             if store.remove(&name)? {
-                println!("Removed contact: {}", name);
+                ui::success(&format!("Removed contact: {}", name));
             } else {
-                println!("Contact \"{}\" not found", name);
+                ui::warn(&format!("Contact \"{}\" not found", name));
             }
         }
 
@@ -1005,7 +1024,11 @@ fn cmd_contacts(action: ContactsAction, data_dir: &str) -> Result<()> {
             let json = store.export_json()?;
             if let Some(path) = output {
                 std::fs::write(&path, &json)?;
-                println!("Exported {} contact(s) to {}", store.count()?, path);
+                ui::success(&format!(
+                    "Exported {} contact(s) to {}",
+                    store.count()?,
+                    path
+                ));
             } else {
                 println!("{}", json);
             }
@@ -1014,7 +1037,7 @@ fn cmd_contacts(action: ContactsAction, data_dir: &str) -> Result<()> {
         ContactsAction::Import { file } => {
             let json = std::fs::read_to_string(&file)?;
             let count = store.import_json(&json)?;
-            println!("Imported {} contact(s) from {}", count, file);
+            ui::success(&format!("Imported {} contact(s) from {}", count, file));
         }
     }
 
@@ -1030,45 +1053,63 @@ fn cmd_groups(action: GroupsAction, data_dir: &str) -> Result<()> {
     match action {
         GroupsAction::Create { name } => {
             let psk = store.create(&name)?;
-            println!("Created group: {}", name);
-            println!("  PSK: {}", hex::encode(psk));
-            println!("\nShare this PSK with group members so they can add it as a contact.");
+            ui::success(&format!("Created group: {}", name.bold()));
+            ui::field("PSK:", &hex::encode(psk));
+            println!(
+                "\n  {}",
+                "Share this PSK with group members so they can add it as a contact.".dimmed()
+            );
         }
 
         GroupsAction::List => {
             let groups = store.list()?;
             if groups.is_empty() {
-                println!("No groups. Create one with: can groups create --name <name>");
+                ui::warn("No groups. Create one with: can groups create --name <name>");
                 return Ok(());
             }
-            println!("{:<20} {:<10} CREATED", "NAME", "MEMBERS");
-            println!("{}", "-".repeat(50));
+            ui::header("Groups");
+            ui::table_header(&format!("{:<20} {:<10} CREATED", "NAME", "MEMBERS"));
+            ui::separator(50);
             for g in &groups {
                 let member_count = store.members(&g.name)?.len();
-                println!("{:<20} {:<10} {}", g.name, member_count, g.created_at);
+                println!(
+                    "  {:<20} {:<10} {}",
+                    g.name.bright_white(),
+                    member_count.to_string().cyan(),
+                    g.created_at.dimmed()
+                );
             }
-            println!("\n{} group(s)", groups.len());
+            println!("\n  {} group(s)", groups.len().to_string().cyan());
         }
 
         GroupsAction::Show { name } => {
             let group = store
                 .get(&name)?
                 .ok_or_else(|| anyhow::anyhow!("Group \"{}\" not found", name))?;
-            println!("Group: {}", group.name);
-            println!("  PSK:     {}", hex::encode(&group.psk));
-            println!("  Created: {}", group.created_at);
+            ui::header(&format!("Group: {}", group.name));
+            ui::field("PSK:", &hex::encode(&group.psk));
+            ui::field("Created:", &group.created_at);
 
             let members = store.members(&name)?;
             if members.is_empty() {
-                println!("  Members: none");
+                ui::field("Members:", "none");
             } else {
-                println!("  Members:");
+                println!("  {}:", "Members".bold());
                 for m in &members {
                     let label = m.label.as_deref().unwrap_or("");
                     if label.is_empty() {
-                        println!("    {} (added {})", m.address, m.added_at);
+                        println!(
+                            "    {} {}",
+                            m.address.dimmed(),
+                            format!("(added {})", m.added_at).dimmed()
+                        );
                     } else {
-                        println!("    {} [{}] (added {})", m.address, label, m.added_at);
+                        println!(
+                            "    {} {} {}",
+                            m.address.dimmed(),
+                            format!("[{}]", label).cyan(),
+                            format!("(added {})", m.added_at).dimmed()
+                        );
                     }
                 }
             }
@@ -1081,26 +1122,29 @@ fn cmd_groups(action: GroupsAction, data_dir: &str) -> Result<()> {
         } => {
             wallet::decode_address(&address)?;
             store.add_member(&group, &address, label.as_deref())?;
-            println!(
+            ui::success(&format!(
                 "Added {} to group \"{}\"",
                 label.as_deref().unwrap_or(&address),
                 group
-            );
+            ));
         }
 
         GroupsAction::RemoveMember { group, address } => {
             if store.remove_member(&group, &address)? {
-                println!("Removed {} from group \"{}\"", address, group);
+                ui::success(&format!("Removed {} from group \"{}\"", address, group));
             } else {
-                println!("Member {} not found in group \"{}\"", address, group);
+                ui::warn(&format!(
+                    "Member {} not found in group \"{}\"",
+                    address, group
+                ));
             }
         }
 
         GroupsAction::Remove { name } => {
             if store.remove(&name)? {
-                println!("Removed group: {}", name);
+                ui::success(&format!("Removed group: {}", name));
             } else {
-                println!("Group \"{}\" not found", name);
+                ui::warn(&format!("Group \"{}\" not found", name));
             }
         }
 
@@ -1108,7 +1152,7 @@ fn cmd_groups(action: GroupsAction, data_dir: &str) -> Result<()> {
             let json = store.export_json()?;
             if let Some(path) = output {
                 std::fs::write(&path, &json)?;
-                println!("Exported {} group(s) to {}", store.count()?, path);
+                ui::success(&format!("Exported {} group(s) to {}", store.count()?, path));
             } else {
                 println!("{}", json);
             }
@@ -1117,7 +1161,7 @@ fn cmd_groups(action: GroupsAction, data_dir: &str) -> Result<()> {
         GroupsAction::Import { file } => {
             let json = std::fs::read_to_string(&file)?;
             let count = store.import_json(&json)?;
-            println!("Imported {} group(s) from {}", count, file);
+            ui::success(&format!("Imported {} group(s) from {}", count, file));
         }
     }
 
@@ -1154,7 +1198,7 @@ fn cmd_change_password(
     keystore::create_keystore(&seed, &address, &new_pw, &ks_path)?;
     seed.zeroize();
 
-    println!("Password changed successfully.");
+    ui::success("Password changed successfully.");
     Ok(())
 }
 
@@ -1162,23 +1206,23 @@ fn cmd_info(data_dir: &str) -> Result<()> {
     let ks_path = keystore_path(data_dir);
 
     if !keystore::keystore_exists(&ks_path) {
-        println!("No wallet configured.");
-        println!("Run `can init` to create a new wallet.");
+        ui::warn("No wallet configured.");
+        println!("  Run {} to create a new wallet.", "can init".cyan().bold());
         return Ok(());
     }
 
     let address = keystore::keystore_address(&ks_path)?;
-    println!("Corvid Agent CAN");
-    println!("  Wallet:   {}", ks_path.display());
-    println!("  Address:  {}", address);
+    ui::banner();
+    ui::field("Wallet:", &ks_path.display().to_string());
+    ui::field("Address:", &address);
 
     // Show contact count if contacts DB exists
     let contacts_path = contacts_db_path(data_dir);
     if contacts_path.exists() {
         let store = ContactStore::open(&contacts_path)?;
-        println!("  Contacts: {}", store.count()?);
+        ui::field("Contacts:", &store.count()?.to_string());
     } else {
-        println!("  Contacts: 0");
+        ui::field("Contacts:", "0");
     }
 
     Ok(())
@@ -1208,43 +1252,45 @@ async fn cmd_status(
     let indexer_url = indexer_url.unwrap_or(net.indexer_url);
     let indexer_token = indexer_token.unwrap_or(net.indexer_token);
 
-    println!("Corvid Agent CAN — Status Check");
-    println!("  Network: {}\n", network);
+    ui::header("Corvid Agent CAN — Status Check");
+    ui::field("Network:", &network.to_string());
+    println!();
 
     // 1. Algod health
     let algod = HttpAlgodClient::new(&algod_url, &algod_token);
-    print!("  Algod ({})... ", algod_url);
+    print!("  {} {}... ", "Algod".bold(), algod_url.dimmed());
     match algod.get_current_round().await {
-        Ok(round) => println!("OK (round {})", round),
-        Err(e) => println!("FAIL ({})", e),
+        Ok(round) => println!("{}", format!("OK (round {})", round).green()),
+        Err(e) => println!("{}", format!("FAIL ({})", e).red()),
     }
 
     // 2. Indexer health
-    print!("  Indexer ({})... ", indexer_url);
+    print!("  {} {}... ", "Indexer".bold(), indexer_url.dimmed());
     match http
         .get(format!("{}/health", indexer_url.trim_end_matches('/')))
         .header("X-Indexer-API-Token", &indexer_token)
         .send()
         .await
     {
-        Ok(resp) if resp.status().is_success() => println!("OK"),
-        Ok(resp) => println!("FAIL (HTTP {})", resp.status()),
-        Err(e) => println!("FAIL ({})", e),
+        Ok(resp) if resp.status().is_success() => println!("{}", "OK".green()),
+        Ok(resp) => println!("{}", format!("FAIL (HTTP {})", resp.status()).red()),
+        Err(e) => println!("{}", format!("FAIL ({})", e).red()),
     }
 
     // 3. Hub health
-    print!("  Hub ({})... ", hub_url);
+    print!("  {} {}... ", "Hub".bold(), hub_url.dimmed());
     match http
         .get(format!("{}/health", hub_url.trim_end_matches('/')))
         .send()
         .await
     {
-        Ok(resp) if resp.status().is_success() => println!("OK"),
-        Ok(resp) => println!("FAIL (HTTP {})", resp.status()),
-        Err(e) => println!("FAIL ({})", e),
+        Ok(resp) if resp.status().is_success() => println!("{}", "OK".green()),
+        Ok(resp) => println!("{}", format!("FAIL (HTTP {})", resp.status()).red()),
+        Err(e) => println!("{}", format!("FAIL ({})", e).red()),
     }
 
     // 4. Identity + balance
+    println!();
     match load_identity(
         seed_hex.as_deref(),
         address.as_deref(),
@@ -1252,21 +1298,30 @@ async fn cmd_status(
         data_dir,
     ) {
         Ok((_seed, addr)) => {
-            println!("\n  Address: {}", addr);
+            ui::field("Address:", &addr);
             match algod.get_account_info(&addr).await {
                 Ok(info) => {
                     let algo = info.amount as f64 / 1_000_000.0;
                     let min_algo = info.min_balance as f64 / 1_000_000.0;
-                    println!("  Balance: {:.6} ALGO (min: {:.6})", algo, min_algo);
+                    ui::field(
+                        "Balance:",
+                        &format!("{} (min: {:.6})", ui::balance(algo), min_algo),
+                    );
                     if info.amount < 100_000 {
-                        println!("  WARNING: Balance is very low — may not be able to send messages");
+                        ui::warn("Balance is very low — may not be able to send messages");
                     }
                 }
-                Err(e) => println!("  Balance: unknown ({})", e),
+                Err(e) => ui::field(
+                    "Balance:",
+                    &format!("{}", format!("unknown ({})", e).yellow()),
+                ),
             }
         }
         Err(_) => {
-            println!("\n  Wallet: not configured (run `can init`)");
+            ui::field(
+                "Wallet:",
+                &format!("{}", "not configured (run `can init`)".yellow()),
+            );
         }
     }
 
@@ -1274,9 +1329,9 @@ async fn cmd_status(
     let contacts_path = contacts_db_path(data_dir);
     if contacts_path.exists() {
         let store = ContactStore::open(&contacts_path)?;
-        println!("  Contacts: {}", store.count()?);
+        ui::field("Contacts:", &store.count()?.to_string());
     } else {
-        println!("  Contacts: 0");
+        ui::field("Contacts:", "0");
     }
 
     // 6. Message cache stats
@@ -1290,9 +1345,12 @@ async fn cmd_status(
             [],
             |r| r.get(0),
         )?;
-        println!("  Messages: {} ({} conversations)", msg_count, conv_count);
+        ui::field(
+            "Messages:",
+            &format!("{} ({} conversations)", msg_count, conv_count),
+        );
     } else {
-        println!("  Messages: 0 (no cache)");
+        ui::field("Messages:", "0 (no cache)");
     }
 
     // 7. Plugin host
@@ -1301,13 +1359,22 @@ async fn cmd_status(
         let plugin_bridge = bridge::PluginBridge::new(&socket_path);
         match plugin_bridge.connect().await {
             Ok(()) => match plugin_bridge.list_plugins().await {
-                Ok(plugins) => println!("  Plugins: {} loaded", plugins.len()),
-                Err(e) => println!("  Plugins: connected but list failed ({})", e),
+                Ok(plugins) => ui::field(
+                    "Plugins:",
+                    &format!("{}", format!("{} loaded", plugins.len()).green()),
+                ),
+                Err(e) => ui::field(
+                    "Plugins:",
+                    &format!("{}", format!("connected but list failed ({})", e).yellow()),
+                ),
             },
-            Err(_) => println!("  Plugins: socket exists but not responding"),
+            Err(_) => ui::field(
+                "Plugins:",
+                &format!("{}", "socket exists but not responding".yellow()),
+            ),
         }
     } else {
-        println!("  Plugins: not running");
+        ui::field("Plugins:", &format!("{}", "not running".dimmed()));
     }
 
     Ok(())
@@ -1447,7 +1514,12 @@ async fn cmd_send(
             {
                 Ok(txid) => {
                     let label = member.label.as_deref().unwrap_or(&member.address);
-                    println!("  Sent to {} ({})", label, txid);
+                    println!(
+                        "  {} Sent to {} {}",
+                        "✓".green(),
+                        label.bright_white(),
+                        format!("({})", txid).dimmed()
+                    );
                     sent += 1;
                 }
                 Err(e) => {
@@ -1456,15 +1528,21 @@ async fn cmd_send(
                         member = %member.address,
                         "failed to send group message"
                     );
-                    eprintln!("  FAIL {} ({})", member.address, e);
+                    println!(
+                        "  {} {} {}",
+                        "✗".red(),
+                        member.address,
+                        format!("({})", e).red()
+                    );
                 }
             }
         }
 
         println!(
-            "\nGroup \"{}\" — sent to {}/{} members",
-            group_name,
-            sent,
+            "\n  {} Group \"{}\" — sent to {}/{} members",
+            "✓".green().bold(),
+            group_name.cyan(),
+            sent.to_string().green(),
             members.len()
         );
         return Ok(());
@@ -1502,10 +1580,10 @@ async fn cmd_send(
     )
     .await?;
 
-    println!("Message sent!");
-    println!("  To:   {}", recipient_address);
-    println!("  TxID: {}", txid);
-    println!("  Size: {} chars", message.len());
+    ui::success("Message sent!");
+    ui::field("To:", &recipient_address);
+    ui::field("TxID:", &txid);
+    ui::field("Size:", &format!("{} chars", message.len()));
 
     Ok(())
 }
@@ -1515,7 +1593,11 @@ fn cmd_inbox(from: Option<String>, limit: usize, data_dir: &str) -> Result<()> {
     let messages_db = data_path.join("messages.db");
 
     if !messages_db.exists() {
-        println!("No messages yet. Run `can run` to start receiving messages.");
+        ui::warn("No messages yet.");
+        println!(
+            "  Run {} to start receiving messages.",
+            "can run".cyan().bold()
+        );
         return Ok(());
     }
 
@@ -1593,9 +1675,13 @@ fn cmd_inbox(from: Option<String>, limit: usize, data_dir: &str) -> Result<()> {
 
     if messages.is_empty() {
         if let Some(ref f) = from {
-            println!("No messages from {}.", f);
+            ui::warn(&format!("No messages from {}.", f));
         } else {
-            println!("Inbox is empty. Run `can run` to start receiving messages.");
+            ui::warn("Inbox is empty.");
+            println!(
+                "  Run {} to start receiving messages.",
+                "can run".cyan().bold()
+            );
         }
         return Ok(());
     }
@@ -1618,14 +1704,15 @@ fn cmd_inbox(from: Option<String>, limit: usize, data_dir: &str) -> Result<()> {
         }
     };
 
-    println!(
-        "{:<5} {:<8} {:<16} {:<20} MESSAGE",
+    ui::header("Inbox");
+    ui::table_header(&format!(
+        "  {:<7} {:<5} {:<16} {:<20} MESSAGE",
         "ROUND", "DIR", "FROM/TO", "TIME"
-    );
-    println!("{}", "-".repeat(80));
+    ));
+    ui::separator(80);
 
     for (sender, recipient, content, timestamp_secs, confirmed_round, direction) in &messages {
-        let dir_label = if direction == "sent" { ">>>" } else { "<<<" };
+        let dir_label = ui::dir_arrow(direction);
         let peer = if direction == "sent" {
             resolve_name(recipient)
         } else {
@@ -1645,12 +1732,16 @@ fn cmd_inbox(from: Option<String>, limit: usize, data_dir: &str) -> Result<()> {
         };
 
         println!(
-            "{:<5} {:<8} {:<16} {:<20} {}",
-            confirmed_round, dir_label, peer, time_str, display_content
+            "  {:<7} {:<8} {:<16} {:<20} {}",
+            confirmed_round.to_string().dimmed(),
+            dir_label,
+            peer.bright_white(),
+            time_str.dimmed(),
+            display_content
         );
     }
 
-    println!("\n{} message(s)", messages.len());
+    println!("\n  {} message(s)", messages.len().to_string().cyan());
     Ok(())
 }
 
@@ -1661,13 +1752,12 @@ async fn cmd_plugin(action: PluginAction, data_dir: &str) -> Result<()> {
     let bridge = bridge::PluginBridge::new(&socket_path);
 
     if let Err(e) = bridge.connect().await {
-        eprintln!(
-            "Cannot connect to plugin host at {}\n\
-             Is the agent running? (can run)\n\
-             Error: {}",
-            socket_path.display(),
-            e
-        );
+        ui::error(&format!(
+            "Cannot connect to plugin host at {}",
+            socket_path.display()
+        ));
+        println!("  Is the agent running? ({})", "can run".cyan().bold());
+        println!("  Error: {}", format!("{}", e).red());
         std::process::exit(1);
     }
 
@@ -1675,19 +1765,26 @@ async fn cmd_plugin(action: PluginAction, data_dir: &str) -> Result<()> {
         PluginAction::List => {
             let plugins = bridge.list_plugins().await?;
             if plugins.is_empty() {
-                println!("No plugins loaded.");
-                println!("Place .wasm files in {}/plugins/ and restart.", data_dir);
+                ui::warn("No plugins loaded.");
+                println!("  Place .wasm files in {}/plugins/ and restart.", data_dir);
                 return Ok(());
             }
-            println!("{:<20} {:<10} {:<12} DESCRIPTION", "ID", "VERSION", "TIER");
-            println!("{}", "-".repeat(70));
+            ui::header("Plugins");
+            ui::table_header(&format!(
+                "{:<20} {:<10} {:<12} DESCRIPTION",
+                "ID", "VERSION", "TIER"
+            ));
+            ui::separator(70);
             for p in &plugins {
                 println!(
-                    "{:<20} {:<10} {:<12} {}",
-                    p.id, p.version, p.trust_tier, p.description
+                    "  {:<20} {:<10} {:<12} {}",
+                    p.id.bright_white(),
+                    p.version.cyan(),
+                    p.trust_tier.yellow(),
+                    p.description.dimmed()
                 );
             }
-            println!("\n{} plugin(s) loaded", plugins.len());
+            println!("\n  {} plugin(s) loaded", plugins.len().to_string().cyan());
         }
 
         PluginAction::Invoke {
@@ -1710,25 +1807,31 @@ async fn cmd_plugin(action: PluginAction, data_dir: &str) -> Result<()> {
             let result = bridge
                 .load_plugin(&abs_path.display().to_string(), &tier)
                 .await?;
-            println!("Loaded: {}", serde_json::to_string_pretty(&result)?);
+            ui::success(&format!(
+                "Loaded: {}",
+                serde_json::to_string_pretty(&result)?
+            ));
         }
 
         PluginAction::Unload { plugin_id } => {
             bridge.unload_plugin(&plugin_id).await?;
-            println!("Unloaded plugin: {}", plugin_id);
+            ui::success(&format!("Unloaded plugin: {}", plugin_id));
         }
 
         PluginAction::Health => {
             let status = bridge.health().await?;
-            println!("Plugin Host Health");
-            println!("  Uptime: {:.1}s", status.uptime_ms as f64 / 1000.0);
+            ui::header("Plugin Host Health");
+            ui::field(
+                "Uptime:",
+                &format!("{:.1}s", status.uptime_ms as f64 / 1000.0),
+            );
             if let Some(plugins) = status.plugins.as_object() {
                 if plugins.is_empty() {
-                    println!("  Plugins: none loaded");
+                    ui::field("Plugins:", "none loaded");
                 } else {
-                    println!("  Plugins:");
+                    println!("  {}:", "Plugins".bold());
                     for (id, state) in plugins {
-                        println!("    {}: {}", id, state);
+                        println!("    {}: {}", id.bright_white(), state);
                     }
                 }
             }
@@ -1812,22 +1915,23 @@ async fn cmd_fund(params: FundParams, data_dir: &str) -> Result<()> {
 
     match network {
         Network::Testnet => {
-            println!("Fund your agent on TestNet:");
-            println!("  Address:   {}", agent_address);
-            println!("  Dispenser: https://bank.testnet.algorand.network");
+            ui::header("Fund your agent on TestNet");
+            ui::field("Address:", &agent_address);
+            ui::field("Dispenser:", "https://bank.testnet.algorand.network");
             return Ok(());
         }
         Network::Mainnet => {
-            println!("Send ALGO to your agent address on MainNet:");
-            println!("  Address: {}", agent_address);
+            ui::header("Fund your agent on MainNet");
+            ui::field("Address:", &agent_address);
+            println!("  {}", "Send ALGO to the address above.".dimmed());
             return Ok(());
         }
         Network::Localnet => {} // continue below
     }
 
     let algo = amount as f64 / 1_000_000.0;
-    println!("Funding agent on localnet ({:.6} ALGO)...", algo);
-    println!("  Recipient: {}", agent_address);
+    ui::header(&format!("Funding agent on localnet ({:.6} ALGO)", algo));
+    ui::field("Recipient:", &agent_address);
 
     // Resolve network config
     let net = network.defaults();
@@ -1885,7 +1989,7 @@ async fn cmd_fund(params: FundParams, data_dir: &str) -> Result<()> {
         .first()
         .ok_or_else(|| anyhow::anyhow!("No accounts found in KMD default wallet"))?;
 
-    println!("  Faucet:    {}", faucet_address);
+    ui::field("Faucet:", faucet_address);
 
     // 4. Build unsigned payment transaction
     let algod = HttpAlgodClient::new(&algod_url, &algod_token);
@@ -1930,7 +2034,7 @@ async fn cmd_fund(params: FundParams, data_dir: &str) -> Result<()> {
         .await
         .map_err(|e| anyhow::anyhow!("Failed to submit transaction: {}", e))?;
 
-    println!("  TxID:      {}", txid);
+    ui::field("TxID:", &txid);
 
     // 7. Wait for confirmation
     algod
@@ -1941,10 +2045,14 @@ async fn cmd_fund(params: FundParams, data_dir: &str) -> Result<()> {
     // Check new balance
     match algod.get_account_info(&agent_address).await {
         Ok(info) => {
-            let balance = info.amount as f64 / 1_000_000.0;
-            println!("\n  Funded! New balance: {:.6} ALGO", balance);
+            let bal = info.amount as f64 / 1_000_000.0;
+            println!();
+            ui::success(&format!("Funded! New balance: {}", ui::balance(bal)));
         }
-        Err(_) => println!("\n  Funded! (could not fetch new balance)"),
+        Err(_) => {
+            println!();
+            ui::success("Funded! (could not fetch new balance)");
+        }
     }
 
     Ok(())
@@ -1972,10 +2080,10 @@ async fn cmd_register(
         }
     };
 
-    println!("Registering agent with hub...");
-    println!("  Address: {}", agent_address);
-    println!("  Name:    {}", name);
-    println!("  Hub:     {}", hub_url);
+    ui::header("Registering agent with hub...");
+    ui::field("Address:", &agent_address);
+    ui::field("Name:", &name);
+    ui::field("Hub:", &hub_url);
 
     let http = reqwest::Client::new();
     let url = format!("{}/a2a/agents/register", hub_url.trim_end_matches('/'));
@@ -1994,9 +2102,10 @@ async fn cmd_register(
 
     if resp.status().is_success() {
         let body: serde_json::Value = resp.json().await.unwrap_or_else(|_| serde_json::json!({}));
-        println!("\nRegistered successfully!");
+        println!();
+        ui::success("Registered successfully!");
         if let Some(id) = body.get("id").and_then(|v| v.as_str()) {
-            println!("  Agent ID: {}", id);
+            ui::field("Agent ID:", id);
         }
     } else {
         let status = resp.status();
