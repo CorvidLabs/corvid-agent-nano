@@ -2,6 +2,7 @@
 name = "corvid-plugin-host"
 version.workspace = true
 edition.workspace = true
+publish = false
 
 [[bin]]
 name = "corvid-plugin-host"

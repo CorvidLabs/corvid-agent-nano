@@ -82,6 +82,101 @@ can plugin list --data-dir ~/.corvid
 can plugin invoke hello-world hello '{"name": "Leif"}'
 ```
 
+## Contacts
+
+Manage PSK (pre-shared key) contacts for encrypted messaging between known agents.
+
+```bash
+# Add a contact
+can contacts add --name <name> --address <ALGO_ADDRESS> --psk <hex_or_base64_key> --data-dir ~/.corvid
+
+# List contacts
+can contacts list --data-dir ~/.corvid
+
+# Remove a contact
+can contacts remove <name> --data-dir ~/.corvid
+
+# Export contacts to JSON (for backup/transfer)
+can contacts export --output contacts.json --data-dir ~/.corvid
+
+# Import contacts from JSON
+can contacts import --file contacts.json --data-dir ~/.corvid
+```
+
+PSK keys can be provided as 64-character hex or 44-character base64 strings. Use `--force` with `add` to overwrite an existing contact.
+
+## Connecting to corvid-agent (Hub)
+
+To connect a `can` agent to the main [corvid-agent](https://github.com/CorvidLabs/corvid-agent) server, both sides need each other as PSK contacts.
+
+### Step 1: Create PSK contact on the server
+
+Add the `can` agent as a PSK contact on the corvid-agent server via its API:
+
+```bash
+curl -X POST http://localhost:3000/api/algochat/psk/contacts \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "can-local",
+    "address": "<CAN_AGENT_ADDRESS>"
+  }'
+```
+
+The server returns a response containing the PSK and the server's Algorand address. Save these — you'll need them for Step 2.
+
+### Step 2: Add the server as a contact on the `can` side
+
+```bash
+can contacts add \
+  --name corvidagent \
+  --address <SERVER_ALGORAND_ADDRESS> \
+  --psk <PSK_HEX_FROM_STEP_1> \
+  --data-dir ~/.corvid
+```
+
+### Step 3: Run the agent
+
+```bash
+# Point --hub-url at the corvid-agent server
+can run --data-dir ~/.corvid --hub-url http://localhost:3578
+```
+
+The agent will:
+1. Poll for incoming AlgoChat messages on-chain
+2. Forward received messages to the hub's A2A task endpoint
+3. Poll the hub for a response
+4. Encrypt the reply and send it back on-chain
+
+### Step 4: Test the connection
+
+From the `can` side, verify the contact was added:
+
+```bash
+can contacts list --data-dir ~/.corvid
+can info --data-dir ~/.corvid
+```
+
+Then run the agent and check logs for successful message sync:
+
+```bash
+RUST_LOG=info can run --data-dir ~/.corvid
+```
+
+### Network Configuration
+
+| Network | Algod URL | Indexer URL | Flag |
+|---------|-----------|-------------|------|
+| Localnet | `http://localhost:4001` | `http://localhost:8980` | `--network localnet` (default) |
+| Testnet | `https://testnet-api.4160.nodely.dev` | `https://testnet-idx.4160.nodely.dev` | `--network testnet` |
+| Mainnet | `https://mainnet-api.4160.nodely.dev` | `https://mainnet-idx.4160.nodely.dev` | `--network mainnet` |
+
+### Troubleshooting
+
+- **"Contact already exists"** — Use `--force` flag to overwrite
+- **No messages received** — Check that both agents are on the same network (localnet/testnet/mainnet) and both have each other as contacts
+- **Hub unreachable** — Verify `--hub-url` points to the running corvid-agent server (default: `http://localhost:3578`)
+- **Transaction failures** — Ensure the agent's Algorand account is funded (localnet accounts are auto-funded)
+
 ## Compatibility
 
 Nano agents communicate with corvid-agent and each other using the same AlgoChat protocol:
