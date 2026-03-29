@@ -1333,8 +1333,7 @@ async fn cmd_status(
     let messages_db = data_path.join("messages.db");
     if messages_db.exists() {
         let conn = rusqlite::Connection::open(&messages_db)?;
-        let msg_count: i64 =
-            conn.query_row("SELECT COUNT(*) FROM messages", [], |r| r.get(0))?;
+        let msg_count: i64 = conn.query_row("SELECT COUNT(*) FROM messages", [], |r| r.get(0))?;
         let conv_count: i64 = conn.query_row(
             "SELECT COUNT(DISTINCT participant) FROM messages",
             [],
@@ -1511,7 +1510,12 @@ async fn cmd_send(
             }
         }
 
-        println!("\nGroup \"{}\" — sent to {}/{} members", group_name, sent, members.len());
+        println!(
+            "\nGroup \"{}\" — sent to {}/{} members",
+            group_name,
+            sent,
+            members.len()
+        );
         return Ok(());
     }
 
@@ -1594,12 +1598,11 @@ fn cmd_inbox(from: Option<String>, limit: usize, data_dir: &str) -> Result<()> {
     let (query, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
         if let Some(ref addr) = from_address {
             (
-                format!(
-                    "SELECT id, participant, sender, recipient, content, timestamp_secs, \
+                "SELECT id, participant, sender, recipient, content, timestamp_secs, \
                      confirmed_round, direction, reply_to_id, reply_to_preview \
                      FROM messages WHERE participant = ?1 \
                      ORDER BY timestamp_secs DESC LIMIT ?2"
-                ),
+                    .to_string(),
                 vec![
                     Box::new(addr.clone()) as Box<dyn rusqlite::types::ToSql>,
                     Box::new(limit as i64),
@@ -1607,12 +1610,11 @@ fn cmd_inbox(from: Option<String>, limit: usize, data_dir: &str) -> Result<()> {
             )
         } else {
             (
-                format!(
-                    "SELECT id, participant, sender, recipient, content, timestamp_secs, \
+                "SELECT id, participant, sender, recipient, content, timestamp_secs, \
                      confirmed_round, direction, reply_to_id, reply_to_preview \
                      FROM messages \
                      ORDER BY timestamp_secs DESC LIMIT ?1"
-                ),
+                    .to_string(),
                 vec![Box::new(limit as i64) as Box<dyn rusqlite::types::ToSql>],
             )
         };
@@ -1822,7 +1824,7 @@ mod kmd {
     }
 }
 
-async fn cmd_fund(
+struct FundParams {
     network: Network,
     algod_url: Option<String>,
     algod_token: Option<String>,
@@ -1830,8 +1832,18 @@ async fn cmd_fund(
     kmd_url: String,
     kmd_token: Option<String>,
     amount: u64,
-    data_dir: &str,
-) -> Result<()> {
+}
+
+async fn cmd_fund(params: FundParams, data_dir: &str) -> Result<()> {
+    let FundParams {
+        network,
+        algod_url,
+        algod_token,
+        address,
+        kmd_url,
+        kmd_token,
+        amount,
+    } = params;
     use algochat::AlgodClient;
     use base64::Engine;
 
@@ -1888,7 +1900,9 @@ async fn cmd_fund(
     let default_wallet = wallets
         .iter()
         .find(|w| w.name == "unencrypted-default-wallet")
-        .ok_or_else(|| anyhow::anyhow!("No default wallet found in KMD. Is the localnet running?"))?;
+        .ok_or_else(|| {
+            anyhow::anyhow!("No default wallet found in KMD. Is the localnet running?")
+        })?;
 
     // 2. Init wallet handle
     let init_resp: kmd::InitResponse = http
@@ -1929,8 +1943,12 @@ async fn cmd_fund(
         .await
         .map_err(|e| anyhow::anyhow!("Failed to get suggested params: {}", e))?;
 
-    let raw_txn =
-        transaction::build_payment_transaction_with_amount(faucet_address, &agent_address, amount, &params)?;
+    let raw_txn = transaction::build_payment_transaction_with_amount(
+        faucet_address,
+        &agent_address,
+        amount,
+        &params,
+    )?;
 
     // 5. Sign via KMD
     let b64 = base64::engine::general_purpose::STANDARD;
@@ -2024,10 +2042,7 @@ async fn cmd_register(
         .map_err(|e| anyhow::anyhow!("Cannot connect to hub at {}: {}", hub_url, e))?;
 
     if resp.status().is_success() {
-        let body: serde_json::Value = resp
-            .json()
-            .await
-            .unwrap_or_else(|_| serde_json::json!({}));
+        let body: serde_json::Value = resp.json().await.unwrap_or_else(|_| serde_json::json!({}));
         println!("\nRegistered successfully!");
         if let Some(id) = body.get("id").and_then(|v| v.as_str()) {
             println!("  Agent ID: {}", id);
@@ -2178,7 +2193,16 @@ async fn main() -> Result<()> {
             amount,
         } => {
             cmd_fund(
-                network, algod_url, algod_token, address, kmd_url, kmd_token, amount, data_dir,
+                FundParams {
+                    network,
+                    algod_url,
+                    algod_token,
+                    address,
+                    kmd_url,
+                    kmd_token,
+                    amount,
+                },
+                data_dir,
             )
             .await
         }
