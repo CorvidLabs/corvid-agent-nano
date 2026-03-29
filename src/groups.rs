@@ -29,6 +29,7 @@ pub struct Group {
 /// A group member entry.
 #[derive(Debug, Clone)]
 pub struct GroupMember {
+    #[allow(dead_code)]
     pub group_name: String,
     pub address: String,
     pub label: Option<String>,
@@ -125,10 +126,7 @@ impl GroupStore {
     pub fn remove(&self, name: &str) -> Result<bool> {
         let conn = lock_db(&self.conn)?;
         // Delete members first (foreign key cascade may not be enabled everywhere)
-        conn.execute(
-            "DELETE FROM group_members WHERE group_name = ?1",
-            [name],
-        )?;
+        conn.execute("DELETE FROM group_members WHERE group_name = ?1", [name])?;
         let rows = conn.execute("DELETE FROM groups WHERE name = ?1", [name])?;
         Ok(rows > 0)
     }
@@ -136,8 +134,7 @@ impl GroupStore {
     /// Get a group by name.
     pub fn get(&self, name: &str) -> Result<Option<Group>> {
         let conn = lock_db(&self.conn)?;
-        let mut stmt =
-            conn.prepare("SELECT name, psk, created_at FROM groups WHERE name = ?1")?;
+        let mut stmt = conn.prepare("SELECT name, psk, created_at FROM groups WHERE name = ?1")?;
         let mut rows = stmt.query_map([name], |row| {
             Ok(Group {
                 name: row.get(0)?,
@@ -303,9 +300,7 @@ mod tests {
         store
             .add_member("team", "ALICE_ADDR", Some("alice"))
             .unwrap();
-        store
-            .add_member("team", "BOB_ADDR", Some("bob"))
-            .unwrap();
+        store.add_member("team", "BOB_ADDR", Some("bob")).unwrap();
 
         let members = store.members("team").unwrap();
         assert_eq!(members.len(), 2);
@@ -342,9 +337,7 @@ mod tests {
     fn export_import_roundtrip() {
         let store1 = GroupStore::in_memory().unwrap();
         store1.create("team").unwrap();
-        store1
-            .add_member("team", "ADDR1", Some("alice"))
-            .unwrap();
+        store1.add_member("team", "ADDR1", Some("alice")).unwrap();
         store1.add_member("team", "ADDR2", None).unwrap();
 
         let json = store1.export_json().unwrap();

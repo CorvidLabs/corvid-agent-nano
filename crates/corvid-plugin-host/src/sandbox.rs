@@ -183,9 +183,9 @@ impl wasmtime::ResourceLimiter for MemoryLimiter {
 
     fn table_growing(
         &mut self,
-        _current: u32,
-        desired: u32,
-        _maximum: Option<u32>,
+        _current: usize,
+        desired: usize,
+        _maximum: Option<usize>,
     ) -> anyhow::Result<bool> {
         // Allow table growth up to a reasonable limit (64K entries)
         Ok(desired <= 65536)

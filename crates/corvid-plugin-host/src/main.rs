@@ -493,7 +493,7 @@ async fn main() -> Result<()> {
         if let Ok(entries) = std::fs::read_dir(&plugins_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.extension().map_or(false, |ext| ext == "wasm") {
+                if path.extension().is_some_and(|ext| ext == "wasm") {
                     let path_str = path.display().to_string();
                     match std::fs::read(&path) {
                         Ok(wasm_bytes) => {

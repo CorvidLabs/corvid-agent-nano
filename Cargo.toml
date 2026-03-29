@@ -42,8 +42,9 @@ dialoguer = "0.11"
 zeroize = { version = "1", features = ["derive"] }
 base64 = "0.22"
 chrono = "0.4"
+colored = "2"
 thiserror = "1"
-wasmtime = { version = "22", features = ["cache", "cranelift"] }
+wasmtime = { version = "27", features = ["cache", "cranelift"] }
 scopeguard = "1"
 regex = "1"
 semver = "1"
@@ -89,6 +90,7 @@ dialoguer.workspace = true
 zeroize.workspace = true
 base64.workspace = true
 chrono.workspace = true
+colored.workspace = true
 rusqlite.workspace = true
 
 [dev-dependencies]
