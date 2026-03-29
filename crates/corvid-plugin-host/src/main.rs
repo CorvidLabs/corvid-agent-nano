@@ -64,6 +64,7 @@ struct ServerState {
     registry: PluginRegistry,
     engine: wasmtime::Engine,
     start_time: Instant,
+    data_dir: PathBuf,
 }
 
 async fn handle_request(state: &ServerState, req: JsonRpcRequest) -> JsonRpcResponse {
@@ -130,8 +131,19 @@ async fn handle_load(
 
     let wasm_bytes = std::fs::read(path).map_err(|e| format!("failed to read WASM: {e}"))?;
 
-    let loaded = corvid_plugin_host::loader::load_plugin(&state.engine, &wasm_bytes, tier)
-        .map_err(|e| format!("load failed: {e}"))?;
+    // Read detached .sig file if it exists alongside the .wasm
+    let sig_path = format!("{path}.sig");
+    let sig_data = std::fs::read(&sig_path).ok();
+    let trusted_keys_dir = state.data_dir.join("trusted-keys");
+
+    let loaded = corvid_plugin_host::loader::load_plugin(
+        &state.engine,
+        &wasm_bytes,
+        sig_data.as_deref(),
+        &trusted_keys_dir,
+        tier,
+    )
+    .map_err(|e| format!("load failed: {e}"))?;
 
     let plugin_id = loaded.manifest.id.clone();
     state
@@ -190,8 +202,18 @@ async fn handle_reload(
 
     let wasm_bytes = std::fs::read(path).map_err(|e| format!("failed to read WASM: {e}"))?;
 
-    let loaded = corvid_plugin_host::loader::load_plugin(&state.engine, &wasm_bytes, tier)
-        .map_err(|e| format!("load failed: {e}"))?;
+    let sig_path = format!("{path}.sig");
+    let sig_data = std::fs::read(&sig_path).ok();
+    let trusted_keys_dir = state.data_dir.join("trusted-keys");
+
+    let loaded = corvid_plugin_host::loader::load_plugin(
+        &state.engine,
+        &wasm_bytes,
+        sig_data.as_deref(),
+        &trusted_keys_dir,
+        tier,
+    )
+    .map_err(|e| format!("load failed: {e}"))?;
 
     state
         .registry
@@ -247,6 +269,7 @@ async fn main() -> Result<()> {
         registry: PluginRegistry::new(),
         engine,
         start_time: Instant::now(),
+        data_dir: data_dir.clone(),
     });
 
     // Bind Unix socket

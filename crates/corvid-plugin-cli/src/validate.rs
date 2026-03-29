@@ -132,7 +132,10 @@ fn extract_and_validate(wasm_bytes: &[u8], report: &mut ValidationReport) -> Res
     let engine = build_engine(&tmp_cache)?;
 
     // Try loading via the host's pipeline (ABI check + manifest extraction)
-    match loader::load_plugin(&engine, wasm_bytes, TrustTier::Untrusted) {
+    // Validation always uses Untrusted tier (skips sig check).
+    // Provide a dummy trusted-keys path since it won't be consulted.
+    let dummy_keys = std::env::temp_dir().join("corvid-no-keys");
+    match loader::load_plugin(&engine, wasm_bytes, None, &dummy_keys, TrustTier::Untrusted) {
         Ok(loaded) => {
             report.abi_version = Some(ABI_VERSION); // passed ABI check
             report.checks.push(Check {

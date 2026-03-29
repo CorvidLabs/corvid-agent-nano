@@ -83,7 +83,7 @@ Configures Wasmtime with AOT compilation cache. Cache directory defaults to `~/.
 Four-step load sequence, all before `init()`:
 
 1. **ABI check** — Extract `__corvid_abi_version()`, verify within `[ABI_MIN_COMPATIBLE, ABI_VERSION]`
-2. **Signature verification** — Ed25519 on WASM binary (Trusted tier only). **Note:** Currently a placeholder that logs a warning and accepts all Trusted plugins
+2. **Signature verification** — Ed25519 on WASM binary (Trusted tier only). Reads detached `.sig` file (hex pubkey + hex signature), verifies against `{data_dir}/trusted-keys/` registry
 3. **Manifest extraction + validation** — ID regex, semver, min_host_version, capability audit
 4. **Instantiation** — Create Wasmtime instance with tier-appropriate limits
 
@@ -186,7 +186,7 @@ Host function linking is implemented — capabilities are gated at instantiation
 7. Each plugin gets its own Wasmtime `Store` — no shared mutable state between plugins
 8. Per-plugin KV namespace isolation is enforced by construction (namespace prefix on all keys)
 9. AOT cache is keyed by `(wasm_hash, compiler_version, cpu_features)` — no stale cache hits
-10. Ed25519 signature verification happens BEFORE manifest extraction for Trusted tier — **currently a placeholder** accepting all Trusted plugins with a warning
+10. Ed25519 signature verification happens BEFORE manifest extraction for Trusted tier — verifies detached `.sig` file and checks public key against `{data_dir}/trusted-keys/` registry
 11. SQL queries from `DbRead` capability will be parsed and rejected if not SELECT-only — **not yet implemented** (no `db.rs` host function)
 12. Native plugin loading (dlopen) is planned for `--features dev-mode` — **not yet implemented**
 13. Panics in plugins are caught at the Wasmtime boundary — never propagate to the host process
@@ -284,3 +284,4 @@ Host function linking is implemented — capabilities are gated at instantiation
 |------|--------|--------|
 | 2026-03-28 | CorvidAgent | Initial spec from council synthesis (Issue #15) |
 | 2026-03-28 | CorvidAgent | Promoted to active — added implementation status markers to RPC methods, host functions, and invariants. Documented stubs (tool discovery, invoke, event dispatch, host function bodies, Ed25519 verification) |
+| 2026-03-28 | CorvidAgent | Implemented Ed25519 signature verification — detached `.sig` file format (hex pubkey + hex sig), trusted key registry at `{data_dir}/trusted-keys/*.pub` |

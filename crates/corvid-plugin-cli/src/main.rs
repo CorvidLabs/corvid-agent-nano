@@ -244,15 +244,26 @@ async fn cmd_install(source: &str, data_dir: &Path, socket_path: &Path) -> Resul
         );
         let sig_resp = client.get(&sig_url).send().await;
 
-        match sig_resp {
-            Ok(resp) if resp.status().is_success() => {
-                // TODO: Verify signature with key registry
-                println!("Signature found (verification not yet implemented)");
-            }
+        let sig_data = match sig_resp {
+            Ok(resp) if resp.status().is_success() => resp
+                .bytes()
+                .await
+                .context("failed to read .sig file contents")?,
             _ => {
                 bail!("Ed25519 signature required for Trusted tier install — .sig file not found");
             }
-        }
+        };
+
+        let trusted_keys_dir = data_dir.join("trusted-keys");
+        corvid_plugin_host::loader::verify_signature(
+            &wasm_bytes,
+            Some(&sig_data),
+            &trusted_keys_dir,
+            tier,
+        )
+        .context("Ed25519 signature verification failed")?;
+
+        println!("Ed25519 signature verified ✓");
     }
 
     // Step 4: Validate the WASM

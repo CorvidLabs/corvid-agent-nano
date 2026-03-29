@@ -24,6 +24,7 @@ tracing-subscriber.workspace = true
 clap.workspace = true
 ed25519-dalek.workspace = true
 sha2.workspace = true
+hex.workspace = true
 scopeguard = "1"
 regex = "1"
 semver = "1"
