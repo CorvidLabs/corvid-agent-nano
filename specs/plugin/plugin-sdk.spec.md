@@ -3,13 +3,13 @@ module: plugin-sdk
 version: 1
 status: active
 files:
-  - corvid-plugin-sdk/src/lib.rs
-  - corvid-plugin-sdk/src/manifest.rs
-  - corvid-plugin-sdk/src/capability.rs
-  - corvid-plugin-sdk/src/context.rs
-  - corvid-plugin-sdk/src/tool.rs
-  - corvid-plugin-sdk/src/error.rs
-  - corvid-plugin-sdk/src/host_api.rs
+  - crates/corvid-plugin-sdk/src/lib.rs
+  - crates/corvid-plugin-sdk/src/manifest.rs
+  - crates/corvid-plugin-sdk/src/capability.rs
+  - crates/corvid-plugin-sdk/src/context.rs
+  - crates/corvid-plugin-sdk/src/tool.rs
+  - crates/corvid-plugin-sdk/src/error.rs
+  - crates/corvid-plugin-sdk/src/host_api.rs
 depends_on: []
 ---
 

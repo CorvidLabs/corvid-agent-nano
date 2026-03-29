@@ -3,7 +3,7 @@ module: plugin-macros
 version: 1
 status: active
 files:
-  - corvid-plugin-macros/src/lib.rs
+  - crates/corvid-plugin-macros/src/lib.rs
 depends_on:
   - specs/plugin/plugin-sdk.spec.md
 ---

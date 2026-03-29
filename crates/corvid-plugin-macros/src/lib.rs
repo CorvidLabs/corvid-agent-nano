@@ -279,8 +279,7 @@ pub fn corvid_tool(attr: TokenStream, item: TokenStream) -> TokenStream {
     let attr_str = attr.to_string();
     let name = extract_attr_value(&attr_str, "name")
         .unwrap_or_else(|| struct_name.to_string().to_lowercase());
-    let description =
-        extract_attr_value(&attr_str, "description").unwrap_or_else(|| String::new());
+    let description = extract_attr_value(&attr_str, "description").unwrap_or_else(|| String::new());
 
     let expanded = quote! {
         #input
@@ -363,6 +362,9 @@ mod tests {
     fn extract_attr_whitespace() {
         let attrs = r#"  name  =  "test"  , description = "desc"  "#;
         assert_eq!(extract_attr_value(attrs, "name"), Some("test".into()));
-        assert_eq!(extract_attr_value(attrs, "description"), Some("desc".into()));
+        assert_eq!(
+            extract_attr_value(attrs, "description"),
+            Some("desc".into())
+        );
     }
 }

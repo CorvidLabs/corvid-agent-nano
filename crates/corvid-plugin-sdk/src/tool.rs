@@ -13,9 +13,5 @@ pub trait PluginTool: Send + Sync {
     fn input_schema(&self) -> serde_json::Value;
 
     /// Execute the tool synchronously. Host wraps in blocking thread pool.
-    fn execute(
-        &self,
-        input: serde_json::Value,
-        ctx: &ToolContext,
-    ) -> Result<String, PluginError>;
+    fn execute(&self, input: serde_json::Value, ctx: &ToolContext) -> Result<String, PluginError>;
 }

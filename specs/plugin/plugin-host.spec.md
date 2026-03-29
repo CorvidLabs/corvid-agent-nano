@@ -3,17 +3,17 @@ module: plugin-host
 version: 1
 status: active
 files:
-  - corvid-plugin-host/src/main.rs
-  - corvid-plugin-host/src/engine.rs
-  - corvid-plugin-host/src/loader.rs
-  - corvid-plugin-host/src/registry.rs
-  - corvid-plugin-host/src/executor.rs
-  - corvid-plugin-host/src/sandbox.rs
-  - corvid-plugin-host/src/discovery.rs
-  - corvid-plugin-host/src/host_functions/messaging.rs
-  - corvid-plugin-host/src/host_functions/storage.rs
-  - corvid-plugin-host/src/host_functions/algo.rs
-  - corvid-plugin-host/src/host_functions/http.rs
+  - crates/corvid-plugin-host/src/main.rs
+  - crates/corvid-plugin-host/src/engine.rs
+  - crates/corvid-plugin-host/src/loader.rs
+  - crates/corvid-plugin-host/src/registry.rs
+  - crates/corvid-plugin-host/src/executor.rs
+  - crates/corvid-plugin-host/src/sandbox.rs
+  - crates/corvid-plugin-host/src/discovery.rs
+  - crates/corvid-plugin-host/src/host_functions/messaging.rs
+  - crates/corvid-plugin-host/src/host_functions/storage.rs
+  - crates/corvid-plugin-host/src/host_functions/algo.rs
+  - crates/corvid-plugin-host/src/host_functions/http.rs
 depends_on:
   - specs/plugin/plugin-sdk.spec.md
   - specs/plugin/plugin-macros.spec.md

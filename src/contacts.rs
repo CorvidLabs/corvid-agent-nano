@@ -7,9 +7,7 @@ use anyhow::{bail, Result};
 use rusqlite::Connection;
 
 /// Acquires the database mutex, converting a poison error into anyhow::Error.
-fn lock_db(
-    mutex: &Mutex<Connection>,
-) -> Result<std::sync::MutexGuard<'_, Connection>> {
+fn lock_db(mutex: &Mutex<Connection>) -> Result<std::sync::MutexGuard<'_, Connection>> {
     mutex
         .lock()
         .map_err(|e| anyhow::anyhow!("Database lock poisoned: {e}"))

@@ -72,15 +72,9 @@ async fn handle_request(
             let manifests = state.registry.list_manifests().await;
             Ok(serde_json::to_value(manifests).unwrap_or_default())
         }
-        "plugin.load" => {
-            handle_load(state, &req.params).await
-        }
-        "plugin.unload" => {
-            handle_unload(state, &req.params).await
-        }
-        "plugin.reload" => {
-            handle_reload(state, &req.params).await
-        }
+        "plugin.load" => handle_load(state, &req.params).await,
+        "plugin.unload" => handle_unload(state, &req.params).await,
+        "plugin.reload" => handle_reload(state, &req.params).await,
         "plugin.tools" => {
             let resp = corvid_plugin_host::discovery::list_tools(
                 &state.registry,
