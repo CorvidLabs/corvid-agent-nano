@@ -12,6 +12,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Fix rustup settings
+        run: |
+          if [ -f "$HOME/.rustup/settings.toml" ]; then
+            if ! grep -q 'version' "$HOME/.rustup/settings.toml" 2>/dev/null; then
+              rm -f "$HOME/.rustup/settings.toml"
+            fi
+          fi
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 

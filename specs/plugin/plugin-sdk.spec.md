@@ -10,6 +10,7 @@ files:
   - crates/corvid-plugin-sdk/src/tool.rs
   - crates/corvid-plugin-sdk/src/error.rs
   - crates/corvid-plugin-sdk/src/host_api.rs
+  - crates/corvid-plugin-sdk/src/service.rs
 depends_on: []
 ---
 
