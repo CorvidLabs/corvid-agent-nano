@@ -1,6 +1,6 @@
 //! Corvid Agent CAN — lightweight Rust AlgoChat agent.
 //!
-//! Subcommands: init, import, run, send, inbox, contacts, change-password, info
+//! Subcommands: init, import, run, send, inbox, status, contacts, change-password, info
 
 use std::fmt;
 use std::sync::Arc;
@@ -257,6 +257,45 @@ enum Command {
 
     /// Show agent identity and status
     Info,
+
+    /// Check health of algod, indexer, hub, balance, contacts, and plugins
+    Status {
+        /// Algorand network preset
+        #[arg(long, default_value = "localnet", env = "CAN_NETWORK")]
+        network: Network,
+
+        /// Override: Algorand node URL
+        #[arg(long, env = "CAN_ALGOD_URL")]
+        algod_url: Option<String>,
+
+        /// Override: Algorand node token
+        #[arg(long, env = "CAN_ALGOD_TOKEN")]
+        algod_token: Option<String>,
+
+        /// Override: Algorand indexer URL
+        #[arg(long, env = "CAN_INDEXER_URL")]
+        indexer_url: Option<String>,
+
+        /// Override: Algorand indexer token
+        #[arg(long, env = "CAN_INDEXER_TOKEN")]
+        indexer_token: Option<String>,
+
+        /// Agent seed (hex). If not provided, loads from keystore.
+        #[arg(long, env = "CAN_SEED")]
+        seed: Option<String>,
+
+        /// Agent Algorand address. Required if --seed is provided.
+        #[arg(long, env = "CAN_ADDRESS")]
+        address: Option<String>,
+
+        /// Keystore password (for loading from keystore)
+        #[arg(long, env = "CAN_PASSWORD")]
+        password: Option<String>,
+
+        /// corvid-agent hub URL
+        #[arg(long, default_value = "http://localhost:3578")]
+        hub_url: String,
+    },
 
     /// Manage plugins
     Plugin {
@@ -916,6 +955,136 @@ fn cmd_info(data_dir: &str) -> Result<()> {
 }
 
 #[allow(clippy::too_many_arguments)]
+async fn cmd_status(
+    network: Network,
+    algod_url: Option<String>,
+    algod_token: Option<String>,
+    indexer_url: Option<String>,
+    indexer_token: Option<String>,
+    seed_hex: Option<String>,
+    address: Option<String>,
+    password: Option<String>,
+    hub_url: String,
+    data_dir: &str,
+) -> Result<()> {
+    use algochat::AlgodClient;
+
+    let http = reqwest::Client::new();
+
+    // Resolve network config
+    let net = network.defaults();
+    let algod_url = algod_url.unwrap_or(net.algod_url);
+    let algod_token = algod_token.unwrap_or(net.algod_token);
+    let indexer_url = indexer_url.unwrap_or(net.indexer_url);
+    let indexer_token = indexer_token.unwrap_or(net.indexer_token);
+
+    println!("Corvid Agent CAN — Status Check");
+    println!("  Network: {}\n", network);
+
+    // 1. Algod health
+    let algod = HttpAlgodClient::new(&algod_url, &algod_token);
+    print!("  Algod ({})... ", algod_url);
+    match algod.get_current_round().await {
+        Ok(round) => println!("OK (round {})", round),
+        Err(e) => println!("FAIL ({})", e),
+    }
+
+    // 2. Indexer health
+    print!("  Indexer ({})... ", indexer_url);
+    match http
+        .get(format!("{}/health", indexer_url.trim_end_matches('/')))
+        .header("X-Indexer-API-Token", &indexer_token)
+        .send()
+        .await
+    {
+        Ok(resp) if resp.status().is_success() => println!("OK"),
+        Ok(resp) => println!("FAIL (HTTP {})", resp.status()),
+        Err(e) => println!("FAIL ({})", e),
+    }
+
+    // 3. Hub health
+    print!("  Hub ({})... ", hub_url);
+    match http
+        .get(format!("{}/health", hub_url.trim_end_matches('/')))
+        .send()
+        .await
+    {
+        Ok(resp) if resp.status().is_success() => println!("OK"),
+        Ok(resp) => println!("FAIL (HTTP {})", resp.status()),
+        Err(e) => println!("FAIL ({})", e),
+    }
+
+    // 4. Identity + balance
+    match load_identity(
+        seed_hex.as_deref(),
+        address.as_deref(),
+        password.as_deref(),
+        data_dir,
+    ) {
+        Ok((_seed, addr)) => {
+            println!("\n  Address: {}", addr);
+            match algod.get_account_info(&addr).await {
+                Ok(info) => {
+                    let algo = info.amount as f64 / 1_000_000.0;
+                    let min_algo = info.min_balance as f64 / 1_000_000.0;
+                    println!("  Balance: {:.6} ALGO (min: {:.6})", algo, min_algo);
+                    if info.amount < 100_000 {
+                        println!("  WARNING: Balance is very low — may not be able to send messages");
+                    }
+                }
+                Err(e) => println!("  Balance: unknown ({})", e),
+            }
+        }
+        Err(_) => {
+            println!("\n  Wallet: not configured (run `can init`)");
+        }
+    }
+
+    // 5. Contacts
+    let contacts_path = contacts_db_path(data_dir);
+    if contacts_path.exists() {
+        let store = ContactStore::open(&contacts_path)?;
+        println!("  Contacts: {}", store.count()?);
+    } else {
+        println!("  Contacts: 0");
+    }
+
+    // 6. Message cache stats
+    let data_path = std::path::Path::new(data_dir);
+    let messages_db = data_path.join("messages.db");
+    if messages_db.exists() {
+        let conn = rusqlite::Connection::open(&messages_db)?;
+        let msg_count: i64 =
+            conn.query_row("SELECT COUNT(*) FROM messages", [], |r| r.get(0))?;
+        let conv_count: i64 = conn.query_row(
+            "SELECT COUNT(DISTINCT participant) FROM messages",
+            [],
+            |r| r.get(0),
+        )?;
+        println!("  Messages: {} ({} conversations)", msg_count, conv_count);
+    } else {
+        println!("  Messages: 0 (no cache)");
+    }
+
+    // 7. Plugin host
+    let socket_path = sidecar::SidecarHandle::socket_path(data_path);
+    if socket_path.exists() {
+        let plugin_bridge = bridge::PluginBridge::new(&socket_path);
+        match plugin_bridge.connect().await {
+            Ok(()) => match plugin_bridge.list_plugins().await {
+                Ok(plugins) => println!("  Plugins: {} loaded", plugins.len()),
+                Err(e) => println!("  Plugins: connected but list failed ({})", e),
+            },
+            Err(_) => println!("  Plugins: socket exists but not responding"),
+        }
+    } else {
+        println!("  Plugins: not running");
+    }
+
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn cmd_send(
     to: String,
     message: String,
@@ -1360,6 +1529,32 @@ async fn main() -> Result<()> {
         } => cmd_change_password(old_password, new_password, data_dir),
 
         Command::Info => cmd_info(data_dir),
+
+        Command::Status {
+            network,
+            algod_url,
+            algod_token,
+            indexer_url,
+            indexer_token,
+            seed,
+            address,
+            password,
+            hub_url,
+        } => {
+            cmd_status(
+                network,
+                algod_url,
+                algod_token,
+                indexer_url,
+                indexer_token,
+                seed,
+                address,
+                password,
+                hub_url,
+                data_dir,
+            )
+            .await
+        }
 
         Command::Plugin { action } => cmd_plugin(action, data_dir).await,
     }

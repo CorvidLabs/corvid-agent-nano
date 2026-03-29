@@ -107,14 +107,33 @@ pub async fn run_message_loop<A, I, S, M>(
                             .await
                         {
                             Some(id) => id,
-                            None => continue, // Hub unreachable, skip reply
+                            None => {
+                                // Hub unreachable — send error reply on-chain
+                                let error_msg = "[error] Agent hub is unreachable. Please try again later.";
+                                warn!(recipient = %msg.sender, "hub unreachable — sending error reply");
+                                if let Err(e) = send_reply(
+                                    &client, &*algod, &config.agent_address,
+                                    &msg.sender, error_msg, &config.signing_key,
+                                ).await {
+                                    warn!(error = %e, "failed to send hub-unreachable error reply");
+                                }
+                                continue;
+                            }
                         };
 
                     // Step 2: Poll for hub response
                     let response = match poll_hub_task(&http, &config.hub_url, &task_id).await {
                         Some(text) => text,
                         None => {
-                            warn!(task_id = %task_id, "hub task did not produce a response");
+                            // Hub timed out or task failed — send error reply on-chain
+                            let error_msg = "[error] Agent did not produce a response. The request may have timed out.";
+                            warn!(task_id = %task_id, recipient = %msg.sender, "hub task failed — sending error reply");
+                            if let Err(e) = send_reply(
+                                &client, &*algod, &config.agent_address,
+                                &msg.sender, error_msg, &config.signing_key,
+                            ).await {
+                                warn!(error = %e, "failed to send hub-timeout error reply");
+                            }
                             continue;
                         }
                     };
