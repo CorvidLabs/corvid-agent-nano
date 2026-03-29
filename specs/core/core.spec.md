@@ -3,11 +3,8 @@ module: core
 version: 3
 status: active
 files:
-  - crates/core/src/lib.rs
-  - crates/core/src/agent.rs
-  - crates/core/src/message.rs
-  - crates/core/src/config.rs
-  - crates/core/src/storage.rs
+  - src/agent.rs
+  - src/storage.rs
 depends_on:
   - CorvidLabs/rs-algochat@algochat
 ---

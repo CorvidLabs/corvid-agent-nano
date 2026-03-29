@@ -49,6 +49,7 @@ impl SqliteKeyStorage {
     }
 
     /// Creates an in-memory SQLite database (useful for testing).
+    #[cfg(test)]
     pub fn in_memory() -> algochat::Result<Self> {
         let conn = Connection::open_in_memory().map_err(map_db_err)?;
         let storage = Self {
@@ -168,6 +169,7 @@ impl SqliteMessageCache {
     }
 
     /// Creates an in-memory SQLite database (useful for testing).
+    #[cfg(test)]
     pub fn in_memory() -> algochat::Result<Self> {
         let conn = Connection::open_in_memory().map_err(map_db_err)?;
         let cache = Self {
