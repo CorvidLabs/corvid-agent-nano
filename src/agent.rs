@@ -263,11 +263,11 @@ async fn poll_hub_task(http: &Client, hub_url: &str, task_id: &str) -> Option<St
     None
 }
 
-/// Encrypt a reply message and send it on-chain via AlgoChat.
+/// Encrypt a message and send it on-chain via AlgoChat.
 ///
-/// Uses PSK encryption if the sender is a PSK contact, otherwise falls back
+/// Uses PSK encryption if the recipient is a PSK contact, otherwise falls back
 /// to standard X25519 encryption.
-async fn send_reply<A, I, S, M>(
+pub async fn send_reply<A, I, S, M>(
     client: &AlgoChat<A, I, S, M>,
     algod: &A,
     sender_address: &str,
