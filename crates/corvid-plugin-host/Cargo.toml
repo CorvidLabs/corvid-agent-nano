@@ -29,6 +29,7 @@ scopeguard = "1"
 regex = "1"
 semver = "1"
 thiserror.workspace = true
+ureq = "3"
 
 [dev-dependencies]
 tempfile = "3"

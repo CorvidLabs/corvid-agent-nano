@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 use wasmtime::Linker;
 
 use crate::loader::PluginState;
+use crate::wasm_mem;
 
 /// In-memory storage backend keyed by `{plugin_id}:{key}`.
 ///
@@ -53,35 +54,82 @@ impl Default for StorageBackend {
 ///
 /// Provides `host_kv_get` and `host_kv_set` in the "env" namespace.
 pub fn link(linker: &mut Linker<PluginState>) -> anyhow::Result<()> {
-    // host_kv_get(key_ptr, key_len) -> ptr to msgpack response
+    // host_kv_get(key_ptr, key_len) -> ptr to length-prefixed response (0 = not found)
     linker.func_wrap(
         "env",
         "host_kv_get",
-        |_caller: wasmtime::Caller<'_, PluginState>, _key_ptr: i32, _key_len: i32| -> i32 {
-            // Full implementation will:
-            // 1. Read key bytes from WASM memory at (key_ptr, key_len)
-            // 2. Look up in StorageBackend with plugin_id namespace
-            // 3. Write msgpack response back to WASM memory
-            // 4. Return pointer to response
-            0 // null ptr = not found (placeholder)
+        |mut caller: wasmtime::Caller<'_, PluginState>, key_ptr: i32, key_len: i32| -> i32 {
+            // Read key string from WASM memory
+            let key = match wasm_mem::read_str(&mut caller, key_ptr, key_len) {
+                Some(k) => k,
+                None => {
+                    tracing::warn!("host_kv_get: failed to read key from WASM memory");
+                    return 0;
+                }
+            };
+
+            let plugin_id = caller.data().plugin_id.clone();
+            let storage = match &caller.data().storage {
+                Some(s) => Arc::clone(s),
+                None => {
+                    tracing::error!("host_kv_get: storage backend not initialized");
+                    return 0;
+                }
+            };
+
+            // Look up value in namespace-scoped storage
+            let value = match storage.get(&plugin_id, &key) {
+                Some(v) => v,
+                None => return 0, // null ptr = not found
+            };
+
+            // Write response back to WASM memory via __corvid_alloc
+            wasm_mem::write_response(&mut caller, &value)
         },
     )?;
 
-    // host_kv_set(key_ptr, key_len, val_ptr, val_len) -> status
+    // host_kv_set(key_ptr, key_len, val_ptr, val_len) -> status (0 = ok, -1 = error)
     linker.func_wrap(
         "env",
         "host_kv_set",
-        |_caller: wasmtime::Caller<'_, PluginState>,
-         _key_ptr: i32,
-         _key_len: i32,
-         _val_ptr: i32,
-         _val_len: i32|
+        |mut caller: wasmtime::Caller<'_, PluginState>,
+         key_ptr: i32,
+         key_len: i32,
+         val_ptr: i32,
+         val_len: i32|
          -> i32 {
-            // Full implementation will:
-            // 1. Read key and value bytes from WASM memory
-            // 2. Store in StorageBackend with plugin_id namespace
-            // 3. Return 0 for success, -1 for error
-            0 // success (placeholder)
+            // Read key string from WASM memory
+            let key = match wasm_mem::read_str(&mut caller, key_ptr, key_len) {
+                Some(k) => k,
+                None => {
+                    tracing::warn!("host_kv_set: failed to read key from WASM memory");
+                    return -1;
+                }
+            };
+
+            // Read value bytes from WASM memory
+            let value = match wasm_mem::read_bytes(&mut caller, val_ptr, val_len) {
+                Some(v) => v,
+                None => {
+                    tracing::warn!("host_kv_set: failed to read value from WASM memory");
+                    return -1;
+                }
+            };
+
+            let plugin_id = caller.data().plugin_id.clone();
+            let storage = match &caller.data().storage {
+                Some(s) => Arc::clone(s),
+                None => {
+                    tracing::error!("host_kv_set: storage backend not initialized");
+                    return -1;
+                }
+            };
+
+            if storage.set(&plugin_id, &key, value) {
+                0 // success
+            } else {
+                -1 // storage lock poisoned
+            }
         },
     )?;
 
@@ -110,5 +158,20 @@ mod tests {
         backend.set("ns", "k", b"v1".to_vec());
         backend.set("ns", "k", b"v2".to_vec());
         assert_eq!(backend.get("ns", "k"), Some(b"v2".to_vec()));
+    }
+
+    #[test]
+    fn storage_empty_key() {
+        let backend = StorageBackend::new();
+        backend.set("ns", "", b"val".to_vec());
+        assert_eq!(backend.get("ns", ""), Some(b"val".to_vec()));
+    }
+
+    #[test]
+    fn storage_binary_values() {
+        let backend = StorageBackend::new();
+        let binary = vec![0u8, 1, 2, 255, 254, 253];
+        backend.set("ns", "bin", binary.clone());
+        assert_eq!(backend.get("ns", "bin"), Some(binary));
     }
 }

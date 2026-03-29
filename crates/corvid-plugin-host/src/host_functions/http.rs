@@ -4,6 +4,7 @@ use wasmtime::Linker;
 
 use crate::loader::PluginState;
 use crate::sandbox::is_ssrf_blocked;
+use crate::wasm_mem;
 
 /// Validates a URL against an allowlist and SSRF rules.
 ///
@@ -35,20 +36,83 @@ fn extract_host_from_url(url: &str) -> Option<String> {
     Some(host_port.split(':').next().unwrap_or(host_port).to_string())
 }
 
+/// MessagePack-serialized HTTP response written back to WASM memory.
+#[derive(serde::Serialize)]
+struct HttpResponse {
+    status: u16,
+    body: Vec<u8>,
+}
+
+/// MessagePack-serialized HTTP error written back to WASM memory.
+#[derive(serde::Serialize)]
+struct HttpError {
+    status: u16,
+    error: String,
+}
+
+/// Execute an HTTP GET request, returning msgpack-serialized response.
+fn do_http_get(url: &str) -> Vec<u8> {
+    match ureq::get(url).call() {
+        Ok(response) => {
+            let status: u16 = response.status().into();
+            let body = response.into_body().read_to_vec().unwrap_or_default();
+            rmp_serde::to_vec(&HttpResponse { status, body }).unwrap_or_default()
+        }
+        Err(e) => rmp_serde::to_vec(&HttpError {
+            status: 0,
+            error: e.to_string(),
+        })
+        .unwrap_or_default(),
+    }
+}
+
+/// Execute an HTTP POST request, returning msgpack-serialized response.
+fn do_http_post(url: &str, request_body: &[u8]) -> Vec<u8> {
+    match ureq::post(url)
+        .header("Content-Type", "application/octet-stream")
+        .send(request_body)
+    {
+        Ok(response) => {
+            let status: u16 = response.status().into();
+            let body = response.into_body().read_to_vec().unwrap_or_default();
+            rmp_serde::to_vec(&HttpResponse { status, body }).unwrap_or_default()
+        }
+        Err(e) => rmp_serde::to_vec(&HttpError {
+            status: 0,
+            error: e.to_string(),
+        })
+        .unwrap_or_default(),
+    }
+}
+
 /// Link HTTP host functions into the WASM linker.
 pub fn link(linker: &mut Linker<PluginState>) -> anyhow::Result<()> {
-    // host_http_get(url_ptr, url_len) -> ptr to msgpack response
+    // host_http_get(url_ptr, url_len) -> ptr to length-prefixed msgpack response
     linker.func_wrap(
         "env",
         "host_http_get",
-        |_caller: wasmtime::Caller<'_, PluginState>, _url_ptr: i32, _url_len: i32| -> i32 {
-            // Full implementation will:
-            // 1. Read URL from WASM memory
-            // 2. Validate against allowlist + SSRF
-            // 3. Make HTTP GET request
-            // 4. Write msgpack response to WASM memory
-            // 5. Return pointer to response
-            0 // placeholder
+        |mut caller: wasmtime::Caller<'_, PluginState>, url_ptr: i32, url_len: i32| -> i32 {
+            let url = match wasm_mem::read_str(&mut caller, url_ptr, url_len) {
+                Some(u) => u,
+                None => {
+                    tracing::warn!("host_http_get: failed to read URL from WASM memory");
+                    return 0;
+                }
+            };
+
+            let allowlist = caller.data().http_allowlist.clone();
+            if !validate_url(&url, &allowlist) {
+                tracing::warn!(url = %url, "host_http_get: URL blocked by allowlist/SSRF rules");
+                let err = rmp_serde::to_vec(&HttpError {
+                    status: 0,
+                    error: "URL blocked by security policy".into(),
+                })
+                .unwrap_or_default();
+                return wasm_mem::write_response(&mut caller, &err);
+            }
+
+            let response = do_http_get(&url);
+            wasm_mem::write_response(&mut caller, &response)
         },
     )?;
 
@@ -56,13 +120,41 @@ pub fn link(linker: &mut Linker<PluginState>) -> anyhow::Result<()> {
     linker.func_wrap(
         "env",
         "host_http_post",
-        |_caller: wasmtime::Caller<'_, PluginState>,
-         _url_ptr: i32,
-         _url_len: i32,
-         _body_ptr: i32,
-         _body_len: i32|
+        |mut caller: wasmtime::Caller<'_, PluginState>,
+         url_ptr: i32,
+         url_len: i32,
+         body_ptr: i32,
+         body_len: i32|
          -> i32 {
-            0 // placeholder
+            let url = match wasm_mem::read_str(&mut caller, url_ptr, url_len) {
+                Some(u) => u,
+                None => {
+                    tracing::warn!("host_http_post: failed to read URL from WASM memory");
+                    return 0;
+                }
+            };
+
+            let request_body = match wasm_mem::read_bytes(&mut caller, body_ptr, body_len) {
+                Some(b) => b,
+                None => {
+                    tracing::warn!("host_http_post: failed to read body from WASM memory");
+                    return 0;
+                }
+            };
+
+            let allowlist = caller.data().http_allowlist.clone();
+            if !validate_url(&url, &allowlist) {
+                tracing::warn!(url = %url, "host_http_post: URL blocked by allowlist/SSRF rules");
+                let err = rmp_serde::to_vec(&HttpError {
+                    status: 0,
+                    error: "URL blocked by security policy".into(),
+                })
+                .unwrap_or_default();
+                return wasm_mem::write_response(&mut caller, &err);
+            }
+
+            let response = do_http_post(&url, &request_body);
+            wasm_mem::write_response(&mut caller, &response)
         },
     )?;
 
@@ -99,5 +191,10 @@ mod tests {
     fn non_http_blocked() {
         let list = vec!["example.com".into()];
         assert!(!validate_url("file:///etc/passwd", &list));
+    }
+
+    #[test]
+    fn empty_allowlist_blocks_all() {
+        assert!(!validate_url("https://example.com/", &[]));
     }
 }

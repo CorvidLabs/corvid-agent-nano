@@ -14,6 +14,7 @@ files:
   - crates/corvid-plugin-host/src/host_functions/storage.rs
   - crates/corvid-plugin-host/src/host_functions/algo.rs
   - crates/corvid-plugin-host/src/host_functions/http.rs
+  - crates/corvid-plugin-host/src/wasm_mem.rs
 depends_on:
   - specs/plugin/plugin-sdk.spec.md
   - specs/plugin/plugin-macros.spec.md
@@ -164,14 +165,22 @@ fn link_host_functions(linker: &mut Linker<State>, caps: &[Capability])
 
 Handles `plugin.list` and `plugin.tools` JSON-RPC methods. Returns manifest and tool info for the TypeScript bridge to register into the MCP/skill registry.
 
+### wasm_mem.rs — WASM Memory Access Helpers
+
+Safe read/write operations across the WASM boundary. Used by all host functions.
+
+- `read_bytes(caller, ptr, len)` — read bytes from plugin linear memory
+- `read_str(caller, ptr, len)` — read UTF-8 string from plugin linear memory
+- `write_response(caller, data)` — allocate via `__corvid_alloc`, write length-prefixed response
+
 ### host_functions/ — Capability Implementations
 
-Host function linking is implemented — capabilities are gated at instantiation time. The SSRF validation logic and storage backend architecture are in place. **Note:** The actual host function bodies are currently stubs returning `0`. Full implementations are planned for the data plane integration phase.
+Host function linking is implemented — capabilities are gated at instantiation time. Storage and HTTP host functions are fully implemented with WASM memory access. Algo and messaging remain stubs for Phase B.
 
 | File | Capability | Status | Description |
 |------|-----------|--------|-------------|
-| `http.rs` | `Network` | **Stub** (URL validation implemented, request execution stubbed) | Allowlisted outbound HTTP with SSRF mitigation |
-| `storage.rs` | `Storage` | **Stub** (StorageBackend trait defined, KV ops stubbed) | Scoped key-value store per plugin namespace |
+| `http.rs` | `Network` | **Implemented** | Allowlisted outbound HTTP with SSRF mitigation via `ureq` |
+| `storage.rs` | `Storage` | **Implemented** | Scoped key-value store per plugin namespace (in-memory) |
 | `algo.rs` | `AlgoRead` | **Stub** | Read Algorand application state, account info |
 | `messaging.rs` | `AgentMessage` | **Stub** | Send messages to agents matching `target_filter` |
 
@@ -254,6 +263,7 @@ Host function linking is implemented — capabilities are gated at instantiation
 | `serde_json` | JSON serialization (control plane) |
 | `scopeguard` | Cleanup guard for drain-and-reload |
 | `ed25519-dalek` | Signature verification for Trusted tier |
+| `ureq` | Synchronous HTTP client for plugin outbound requests |
 
 ### Consumed By
 
@@ -285,3 +295,4 @@ Host function linking is implemented — capabilities are gated at instantiation
 | 2026-03-28 | CorvidAgent | Initial spec from council synthesis (Issue #15) |
 | 2026-03-28 | CorvidAgent | Promoted to active — added implementation status markers to RPC methods, host functions, and invariants. Documented stubs (tool discovery, invoke, event dispatch, host function bodies, Ed25519 verification) |
 | 2026-03-28 | CorvidAgent | Implemented Ed25519 signature verification — detached `.sig` file format (hex pubkey + hex sig), trusted key registry at `{data_dir}/trusted-keys/*.pub` |
+| 2026-03-28 | CorvidAgent | Phase A data plane: WASM memory access layer (`wasm_mem.rs`), real `host_kv_get`/`host_kv_set` with namespace isolation, real `host_http_get`/`host_http_post` via `ureq` with SSRF+allowlist validation |

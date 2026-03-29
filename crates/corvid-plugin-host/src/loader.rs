@@ -1,12 +1,14 @@
 //! Plugin loading pipeline — ABI check, signature, manifest, instantiation.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use corvid_plugin_sdk::{PluginManifest, TrustTier, ABI_MIN_COMPATIBLE, ABI_VERSION};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use wasmtime::{Engine, Instance, Linker, Module, Store};
 
+use crate::host_functions::storage::StorageBackend;
 use crate::sandbox::{MemoryLimiter, SandboxLimits};
 
 /// Errors during plugin loading (before init).
@@ -37,9 +39,15 @@ pub struct LoadedPlugin {
 }
 
 /// Plugin host state stored in each Wasmtime `Store`.
+///
+/// `storage` and `http_allowlist` are `None` during manifest extraction
+/// (host functions are never linked in that context) and `Some` during
+/// actual plugin execution.
 pub struct PluginState {
     pub limiter: MemoryLimiter,
     pub plugin_id: String,
+    pub storage: Option<Arc<StorageBackend>>,
+    pub http_allowlist: Vec<String>,
 }
 
 /// Current host version for min_host_version checks.
@@ -307,6 +315,8 @@ pub fn load_plugin(
         PluginState {
             limiter: MemoryLimiter::new(limits.memory_bytes),
             plugin_id: String::new(),
+            storage: None,
+            http_allowlist: Vec::new(),
         },
     );
     store.limiter(|state| &mut state.limiter);

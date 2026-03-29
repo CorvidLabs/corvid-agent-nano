@@ -10,6 +10,7 @@ pub mod host_functions;
 pub mod loader;
 pub mod registry;
 pub mod sandbox;
+pub mod wasm_mem;
 
 pub use engine::build_engine;
 pub use loader::{LoadError, LoadedPlugin};
