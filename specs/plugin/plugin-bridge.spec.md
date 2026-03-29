@@ -19,21 +19,11 @@ This is the **only TypeScript code** needed to integrate the entire Rust plugin 
 
 ## Public API
 
-### Exported Structs
+### Exported Classes
 
-| Struct | File | Description |
-|--------|------|-------------|
+| Class | File | Description |
+|-------|------|-------------|
 | `PluginBridge` | `rust-bridge.ts` | Unix socket client — JSON-RPC dispatch, tool invocation, event forwarding |
-| `PluginManifest` | `plugins.ts` | Plugin manifest interface: id, version, author, capabilities, tools |
-| `ToolInfo` | `plugins.ts` | Tool descriptor: name, description, input JSON Schema |
-| `HealthStatus` | `rust-bridge.ts` | Plugin host health status: connected, plugin states, uptime |
-| `PluginEvent` | `rust-bridge.ts` | Event forwarded to subscribing plugins |
-
-### Exported Functions
-
-| Function | Parameters | Returns | Description |
-|----------|-----------|---------|-------------|
-| `registerPluginRoutes` | `(router: Router, bridge: PluginBridge)` | `void` | Register REST endpoints for plugin listing and invocation |
 
 ### PluginBridge Methods
 
@@ -161,7 +151,8 @@ interface HealthStatus {
 | Module | What is used |
 |--------|-------------|
 | `server/routes/plugins.ts` | `PluginBridge` for REST endpoints |
-| Agent tool invocation pipeline | Plugin tools callable like any built-in tool via auto-registration |
+| `server/tools/registry.ts` | Auto-registered plugin tools |
+| Agent tool invocation pipeline | Plugin tools callable like any built-in tool |
 
 ## Configuration
 

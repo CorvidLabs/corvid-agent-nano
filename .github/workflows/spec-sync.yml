@@ -17,3 +17,4 @@ jobs:
         with:
           strict: 'true'
           require-coverage: '100'
+          remote: 'true'

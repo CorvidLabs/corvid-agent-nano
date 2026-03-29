@@ -16,6 +16,7 @@ use tokio::net::UnixListener;
 use corvid_plugin_host::engine::build_engine;
 use corvid_plugin_host::host_functions::storage::StorageBackend;
 use corvid_plugin_host::invoke::InvokeContext;
+use corvid_plugin_host::loader;
 use corvid_plugin_host::registry::PluginRegistry;
 
 #[derive(Parser, Debug)]
@@ -74,7 +75,7 @@ async fn handle_request(state: &ServerState, req: JsonRpcRequest) -> JsonRpcResp
     let result = match req.method.as_str() {
         "plugin.list" => {
             let manifests = state.registry.list_manifests().await;
-            Ok(serde_json::to_value(manifests).unwrap_or_default())
+            Ok(serde_json::json!({ "plugins": manifests }))
         }
         "plugin.load" => handle_load(state, &req.params).await,
         "plugin.unload" => handle_unload(state, &req.params).await,
@@ -236,6 +237,7 @@ async fn handle_invoke(
 ) -> Result<serde_json::Value, String> {
     let plugin_id = params
         .get("plugin_id")
+        .or_else(|| params.get("pluginId"))
         .and_then(|v| v.as_str())
         .ok_or("missing 'plugin_id' parameter")?;
 
@@ -244,10 +246,27 @@ async fn handle_invoke(
         .and_then(|v| v.as_str())
         .ok_or("missing 'tool' parameter")?;
 
-    let input = params
-        .get("input")
-        .cloned()
-        .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+    // Input can be raw JSON or base64-encoded msgpack (from PluginBridge).
+    // The PluginBridge sends base64(msgpack({pluginId, tool, input})) — we
+    // extract the nested `input` field.
+    let input = match params.get("input").and_then(|v| v.as_str()) {
+        Some(b64) => {
+            use base64::Engine as _;
+            match base64::engine::general_purpose::STANDARD.decode(b64) {
+                Ok(bytes) => {
+                    let decoded: serde_json::Value =
+                        rmp_serde::from_slice(&bytes).unwrap_or_default();
+                    // Extract nested input from PluginBridge envelope
+                    decoded.get("input").cloned().unwrap_or(decoded)
+                }
+                Err(_) => serde_json::Value::String(b64.to_string()),
+            }
+        }
+        _ => params
+            .get("input")
+            .cloned()
+            .unwrap_or(serde_json::Value::Object(serde_json::Map::new())),
+    };
 
     let slot = state
         .registry
@@ -466,6 +485,57 @@ async fn main() -> Result<()> {
         data_dir: data_dir.clone(),
         invoke_ctx,
     });
+
+    // Auto-load plugins from {data_dir}/plugins/*.wasm
+    let plugins_dir = data_dir.join("plugins");
+    if plugins_dir.is_dir() {
+        let mut count = 0u32;
+        if let Ok(entries) = std::fs::read_dir(&plugins_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().map_or(false, |ext| ext == "wasm") {
+                    let path_str = path.display().to_string();
+                    match std::fs::read(&path) {
+                        Ok(wasm_bytes) => {
+                            let sig_path = format!("{path_str}.sig");
+                            let sig_data = std::fs::read(&sig_path).ok();
+                            let trusted_keys_dir = data_dir.join("trusted-keys");
+
+                            match loader::load_plugin(
+                                &state.engine,
+                                &wasm_bytes,
+                                sig_data.as_deref(),
+                                &trusted_keys_dir,
+                                corvid_plugin_sdk::TrustTier::Untrusted,
+                            ) {
+                                Ok(loaded) => {
+                                    let id = loaded.manifest.id.clone();
+                                    match state.registry.register(loaded).await {
+                                        Ok(()) => {
+                                            tracing::info!(plugin = %id, path = %path_str, "auto-loaded plugin");
+                                            count += 1;
+                                        }
+                                        Err(e) => {
+                                            tracing::warn!(path = %path_str, error = %e, "failed to register plugin");
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::warn!(path = %path_str, error = %e, "failed to load plugin");
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(path = %path_str, error = %e, "failed to read WASM file");
+                        }
+                    }
+                }
+            }
+        }
+        if count > 0 {
+            tracing::info!(count, "auto-loaded plugins from {}", plugins_dir.display());
+        }
+    }
 
     // Bind Unix socket
     let listener = UnixListener::bind(&socket_path)?;

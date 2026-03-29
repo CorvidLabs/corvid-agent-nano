@@ -20,8 +20,8 @@ Proc-macro crate (`proc-macro = true`) that generates WASM export glue for plugi
 
 | Macro | Kind | Description |
 |-------|------|-------------|
-| `corvid_plugin` | Attribute macro | Applied to a struct that implements `CorvidPlugin`. Generates all WASM export functions |
-| `corvid_tool` | Attribute macro | Applied to a struct to generate `PluginTool` trait implementation from annotations |
+| `#[corvid_plugin]` | Attribute macro | Applied to a struct that implements `CorvidPlugin`. Generates all WASM export functions |
+| `#[corvid_tool]` | Attribute macro | Applied to a struct to generate `PluginTool` trait implementation from annotations |
 
 ### Generated WASM Exports
 
