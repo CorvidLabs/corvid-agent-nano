@@ -16,8 +16,8 @@ use crate::transaction;
 pub struct AgentLoopConfig {
     /// How often to poll for new messages (seconds).
     pub poll_interval_secs: u64,
-    /// Hub URL for corvid-agent API.
-    pub hub_url: String,
+    /// Hub URL for corvid-agent API. None = P2P mode (no hub forwarding).
+    pub hub_url: Option<String>,
     /// Agent display name.
     pub agent_name: String,
     /// Agent's Algorand address (for sending replies).
@@ -30,7 +30,7 @@ impl Default for AgentLoopConfig {
     fn default() -> Self {
         Self {
             poll_interval_secs: 5,
-            hub_url: "http://localhost:3578".to_string(),
+            hub_url: Some("http://localhost:3578".to_string()),
             agent_name: "can".to_string(),
             agent_address: String::new(),
             signing_key: SigningKey::from_bytes(&[0u8; 32]),
@@ -80,14 +80,24 @@ pub async fn run_message_loop<A, I, S, M>(
 {
     let interval = Duration::from_secs(config.poll_interval_secs);
     let http = Client::new();
+    let p2p_mode = config.hub_url.is_none();
 
-    info!(
-        name = %config.agent_name,
-        poll_secs = config.poll_interval_secs,
-        hub = %config.hub_url,
-        address = %config.agent_address,
-        "starting message loop (bidirectional)"
-    );
+    if p2p_mode {
+        info!(
+            name = %config.agent_name,
+            poll_secs = config.poll_interval_secs,
+            address = %config.agent_address,
+            "starting message loop (P2P — no hub)"
+        );
+    } else {
+        info!(
+            name = %config.agent_name,
+            poll_secs = config.poll_interval_secs,
+            hub = config.hub_url.as_deref().unwrap_or(""),
+            address = %config.agent_address,
+            "starting message loop (bidirectional)"
+        );
+    }
 
     loop {
         match client.sync().await {
@@ -101,9 +111,17 @@ pub async fn run_message_loop<A, I, S, M>(
                         truncate(&msg.content, 100)
                     );
 
+                    // P2P mode: receive and store only, no hub forwarding
+                    if p2p_mode {
+                        debug!(from = %msg.sender, "message stored (P2P mode)");
+                        continue;
+                    }
+
+                    let hub_url = config.hub_url.as_deref().unwrap();
+
                     // Step 1: Forward to hub
                     let task_id =
-                        match forward_to_hub(&http, &config.hub_url, &msg.sender, &msg.content)
+                        match forward_to_hub(&http, hub_url, &msg.sender, &msg.content)
                             .await
                         {
                             Some(id) => id,
@@ -122,7 +140,7 @@ pub async fn run_message_loop<A, I, S, M>(
                         };
 
                     // Step 2: Poll for hub response
-                    let response = match poll_hub_task(&http, &config.hub_url, &task_id).await {
+                    let response = match poll_hub_task(&http, hub_url, &task_id).await {
                         Some(text) => text,
                         None => {
                             // Hub timed out or task failed — send error reply on-chain
@@ -377,7 +395,10 @@ mod tests {
     fn default_config() {
         let config = AgentLoopConfig::default();
         assert_eq!(config.poll_interval_secs, 5);
-        assert_eq!(config.hub_url, "http://localhost:3578");
+        assert_eq!(
+            config.hub_url.as_deref(),
+            Some("http://localhost:3578")
+        );
         assert_eq!(config.agent_name, "can");
     }
 

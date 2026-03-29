@@ -1,6 +1,6 @@
 //! Corvid Agent CAN — lightweight Rust AlgoChat agent.
 //!
-//! Subcommands: init, import, run, send, inbox, status, contacts, change-password, info
+//! Subcommands: init, import, run, send, inbox, status, contacts, groups, change-password, info
 
 use std::fmt;
 use std::sync::Arc;
@@ -17,6 +17,7 @@ mod agent;
 mod algorand;
 mod bridge;
 mod contacts;
+mod groups;
 mod keystore;
 mod sidecar;
 mod storage;
@@ -27,6 +28,7 @@ use storage::{SqliteKeyStorage, SqliteMessageCache};
 
 use algorand::{HttpAlgodClient, HttpIndexerClient};
 use contacts::ContactStore;
+use groups::GroupStore;
 
 // ---------------------------------------------------------------------------
 // Network presets
@@ -182,13 +184,21 @@ enum Command {
         /// Disable the plugin host sidecar
         #[arg(long, default_value = "false")]
         no_plugins: bool,
+
+        /// Run in direct P2P mode (no hub forwarding — receive and store only)
+        #[arg(long, default_value = "false")]
+        no_hub: bool,
     },
 
-    /// Send an encrypted message to a contact or address
+    /// Send an encrypted message to a contact, address, or group
     Send {
-        /// Recipient: contact name or Algorand address
-        #[arg(long)]
-        to: String,
+        /// Recipient: contact name or Algorand address (mutually exclusive with --group)
+        #[arg(long, required_unless_present = "group")]
+        to: Option<String>,
+
+        /// Send to all members of a group channel
+        #[arg(long, conflicts_with = "to")]
+        group: Option<String>,
 
         /// Message text to send
         #[arg(long)]
@@ -242,6 +252,12 @@ enum Command {
     Contacts {
         #[command(subcommand)]
         action: ContactsAction,
+    },
+
+    /// Manage group PSK channels
+    Groups {
+        #[command(subcommand)]
+        action: GroupsAction,
     },
 
     /// Change the keystore password
@@ -386,6 +402,70 @@ enum ContactsAction {
     },
 }
 
+#[derive(Subcommand)]
+enum GroupsAction {
+    /// Create a new group with a random PSK
+    Create {
+        /// Group name
+        #[arg(long)]
+        name: String,
+    },
+
+    /// List all groups
+    List,
+
+    /// Show group details and members
+    Show {
+        /// Group name
+        name: String,
+    },
+
+    /// Add a member to a group
+    AddMember {
+        /// Group name
+        #[arg(long)]
+        group: String,
+
+        /// Member's Algorand address
+        #[arg(long)]
+        address: String,
+
+        /// Optional label for the member
+        #[arg(long)]
+        label: Option<String>,
+    },
+
+    /// Remove a member from a group
+    RemoveMember {
+        /// Group name
+        #[arg(long)]
+        group: String,
+
+        /// Member's Algorand address
+        #[arg(long)]
+        address: String,
+    },
+
+    /// Remove a group and all its members
+    Remove {
+        /// Group name
+        name: String,
+    },
+
+    /// Export groups as JSON
+    Export {
+        /// Output file (stdout if not specified)
+        #[arg(long)]
+        output: Option<String>,
+    },
+
+    /// Import groups from JSON
+    Import {
+        /// Input file
+        file: String,
+    },
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -396,6 +476,10 @@ fn keystore_path(data_dir: &str) -> std::path::PathBuf {
 
 fn contacts_db_path(data_dir: &str) -> std::path::PathBuf {
     std::path::Path::new(data_dir).join("contacts.db")
+}
+
+fn groups_db_path(data_dir: &str) -> std::path::PathBuf {
+    std::path::Path::new(data_dir).join("groups.db")
 }
 
 /// Prompt for a password interactively (no echo).
@@ -603,6 +687,7 @@ async fn cmd_run(
     hub_url: String,
     poll_interval: u64,
     no_plugins: bool,
+    no_hub: bool,
     data_dir: &str,
 ) -> Result<()> {
     // Resolve network config
@@ -620,12 +705,14 @@ async fn cmd_run(
         data_dir,
     )?;
 
+    let effective_hub = if no_hub { "disabled (P2P mode)".to_string() } else { hub_url.clone() };
+
     info!(
         name = %name,
         network = %network,
         algod = %algod_url,
         indexer = %indexer_url,
-        hub = %hub_url,
+        hub = %effective_hub,
         address = %agent_address,
         "starting corvid-agent-nano"
     );
@@ -694,6 +781,48 @@ async fn cmd_run(
         }
     }
 
+    // Register group PSKs
+    let groups_path = groups_db_path(data_dir);
+    let group_store = if groups_path.exists() {
+        Some(GroupStore::open(&groups_path)?)
+    } else {
+        None
+    };
+
+    let mut group_count = 0;
+    if let Some(store) = &group_store {
+        let groups = store.list()?;
+        for group in &groups {
+            let members = store.members(&group.name)?;
+            let mut psk = [0u8; 32];
+            psk.copy_from_slice(&group.psk);
+            for member in &members {
+                if member.address == agent_address {
+                    continue; // Skip self
+                }
+                let label = member
+                    .label
+                    .clone()
+                    .unwrap_or_else(|| format!("{}:{}", group.name, &member.address[..8]));
+                if let Err(e) = client
+                    .add_psk_contact(&member.address, &psk, Some(label))
+                    .await
+                {
+                    tracing::warn!(
+                        group = %group.name,
+                        member = %member.address,
+                        error = %e,
+                        "failed to register group PSK contact"
+                    );
+                }
+            }
+            group_count += 1;
+        }
+        if group_count > 0 {
+            info!(groups = group_count, "registered group PSK contacts");
+        }
+    }
+
     let pub_key = hex::encode(client.encryption_public_key());
     info!(
         address = %agent_address,
@@ -711,7 +840,8 @@ async fn cmd_run(
     println!("  Address:  {}", agent_address);
     println!("  Enc Key:  {}", &pub_key[..16]);
     println!("  Contacts: {}", contact_count);
-    println!("  Hub:      {}\n", hub_url);
+    println!("  Groups:   {}", group_count);
+    println!("  Hub:      {}\n", effective_hub);
 
     let client = Arc::new(client);
 
@@ -793,7 +923,7 @@ async fn cmd_run(
     let loop_algod = Arc::clone(&algod_for_tx);
     let loop_config = agent::AgentLoopConfig {
         poll_interval_secs: poll_interval,
-        hub_url: hub_url.clone(),
+        hub_url: if no_hub { None } else { Some(hub_url.clone()) },
         agent_name: name.clone(),
         agent_address: agent_address.clone(),
         signing_key,
@@ -888,6 +1018,109 @@ fn cmd_contacts(action: ContactsAction, data_dir: &str) -> Result<()> {
             let json = std::fs::read_to_string(&file)?;
             let count = store.import_json(&json)?;
             println!("Imported {} contact(s) from {}", count, file);
+        }
+    }
+
+    Ok(())
+}
+
+fn cmd_groups(action: GroupsAction, data_dir: &str) -> Result<()> {
+    let data_path = std::path::Path::new(data_dir);
+    std::fs::create_dir_all(data_path)?;
+
+    let store = GroupStore::open(groups_db_path(data_dir))?;
+
+    match action {
+        GroupsAction::Create { name } => {
+            let psk = store.create(&name)?;
+            println!("Created group: {}", name);
+            println!("  PSK: {}", hex::encode(psk));
+            println!("\nShare this PSK with group members so they can add it as a contact.");
+        }
+
+        GroupsAction::List => {
+            let groups = store.list()?;
+            if groups.is_empty() {
+                println!("No groups. Create one with: can groups create --name <name>");
+                return Ok(());
+            }
+            println!("{:<20} {:<10} CREATED", "NAME", "MEMBERS");
+            println!("{}", "-".repeat(50));
+            for g in &groups {
+                let member_count = store.members(&g.name)?.len();
+                println!("{:<20} {:<10} {}", g.name, member_count, g.created_at);
+            }
+            println!("\n{} group(s)", groups.len());
+        }
+
+        GroupsAction::Show { name } => {
+            let group = store
+                .get(&name)?
+                .ok_or_else(|| anyhow::anyhow!("Group \"{}\" not found", name))?;
+            println!("Group: {}", group.name);
+            println!("  PSK:     {}", hex::encode(&group.psk));
+            println!("  Created: {}", group.created_at);
+
+            let members = store.members(&name)?;
+            if members.is_empty() {
+                println!("  Members: none");
+            } else {
+                println!("  Members:");
+                for m in &members {
+                    let label = m.label.as_deref().unwrap_or("");
+                    if label.is_empty() {
+                        println!("    {} (added {})", m.address, m.added_at);
+                    } else {
+                        println!("    {} [{}] (added {})", m.address, label, m.added_at);
+                    }
+                }
+            }
+        }
+
+        GroupsAction::AddMember {
+            group,
+            address,
+            label,
+        } => {
+            wallet::decode_address(&address)?;
+            store.add_member(&group, &address, label.as_deref())?;
+            println!(
+                "Added {} to group \"{}\"",
+                label.as_deref().unwrap_or(&address),
+                group
+            );
+        }
+
+        GroupsAction::RemoveMember { group, address } => {
+            if store.remove_member(&group, &address)? {
+                println!("Removed {} from group \"{}\"", address, group);
+            } else {
+                println!("Member {} not found in group \"{}\"", address, group);
+            }
+        }
+
+        GroupsAction::Remove { name } => {
+            if store.remove(&name)? {
+                println!("Removed group: {}", name);
+            } else {
+                println!("Group \"{}\" not found", name);
+            }
+        }
+
+        GroupsAction::Export { output } => {
+            let json = store.export_json()?;
+            if let Some(path) = output {
+                std::fs::write(&path, &json)?;
+                println!("Exported {} group(s) to {}", store.count()?, path);
+            } else {
+                println!("{}", json);
+            }
+        }
+
+        GroupsAction::Import { file } => {
+            let json = std::fs::read_to_string(&file)?;
+            let count = store.import_json(&json)?;
+            println!("Imported {} group(s) from {}", count, file);
         }
     }
 
@@ -1086,7 +1319,8 @@ async fn cmd_status(
 
 #[allow(clippy::too_many_arguments)]
 async fn cmd_send(
-    to: String,
+    to: Option<String>,
+    group: Option<String>,
     message: String,
     network: Network,
     algod_url: Option<String>,
@@ -1165,6 +1399,79 @@ async fn cmd_send(
         }
     }
 
+    // Build a separate algod client for transaction submission
+    let algod_for_tx = HttpAlgodClient::new(&algod_url, &algod_token);
+
+    // Group send: broadcast to all members
+    if let Some(group_name) = group {
+        let group_store = GroupStore::open(groups_db_path(data_dir))?;
+        let grp = group_store
+            .get(&group_name)?
+            .ok_or_else(|| anyhow::anyhow!("Group \"{}\" not found", group_name))?;
+
+        let members = group_store.members(&group_name)?;
+        if members.is_empty() {
+            bail!(
+                "Group \"{}\" has no members. Add members with: can groups add-member --group {} --address <addr>",
+                group_name, group_name
+            );
+        }
+
+        // Register group PSK for each member
+        let mut psk = [0u8; 32];
+        psk.copy_from_slice(&grp.psk);
+        for member in &members {
+            if member.address == agent_address {
+                continue; // Skip self
+            }
+            let _ = client
+                .add_psk_contact(
+                    &member.address,
+                    &psk,
+                    member.label.clone().or_else(|| Some(group_name.clone())),
+                )
+                .await;
+        }
+
+        let mut sent = 0;
+        for member in &members {
+            if member.address == agent_address {
+                continue; // Skip self
+            }
+
+            match agent::send_reply(
+                &client,
+                &algod_for_tx,
+                &agent_address,
+                &member.address,
+                &message,
+                &signing_key,
+            )
+            .await
+            {
+                Ok(txid) => {
+                    let label = member.label.as_deref().unwrap_or(&member.address);
+                    println!("  Sent to {} ({})", label, txid);
+                    sent += 1;
+                }
+                Err(e) => {
+                    warn!(
+                        error = %e,
+                        member = %member.address,
+                        "failed to send group message"
+                    );
+                    eprintln!("  FAIL {} ({})", member.address, e);
+                }
+            }
+        }
+
+        println!("\nGroup \"{}\" — sent to {}/{} members", group_name, sent, members.len());
+        return Ok(());
+    }
+
+    // Single recipient send
+    let to = to.unwrap(); // Safe: clap ensures --to or --group
+
     // Resolve recipient: try as contact name first, then as raw address
     let recipient_address = if let Some(store) = &contact_store {
         if let Some(contact) = store.get(&to)? {
@@ -1182,9 +1489,6 @@ async fn cmd_send(
         wallet::decode_address(&to)?;
         to.clone()
     };
-
-    // Build a separate algod client for transaction submission
-    let algod_for_tx = HttpAlgodClient::new(&algod_url, &algod_token);
 
     // Encrypt and send
     let txid = agent::send_reply(
@@ -1472,6 +1776,7 @@ async fn main() -> Result<()> {
             hub_url,
             poll_interval,
             no_plugins,
+            no_hub,
         } => {
             cmd_run(
                 network,
@@ -1486,6 +1791,7 @@ async fn main() -> Result<()> {
                 hub_url,
                 poll_interval,
                 no_plugins,
+                no_hub,
                 data_dir,
             )
             .await
@@ -1493,6 +1799,7 @@ async fn main() -> Result<()> {
 
         Command::Send {
             to,
+            group,
             message,
             network,
             algod_url,
@@ -1505,6 +1812,7 @@ async fn main() -> Result<()> {
         } => {
             cmd_send(
                 to,
+                group,
                 message,
                 network,
                 algod_url,
@@ -1522,6 +1830,8 @@ async fn main() -> Result<()> {
         Command::Inbox { from, limit } => cmd_inbox(from, limit, data_dir),
 
         Command::Contacts { action } => cmd_contacts(action, data_dir),
+
+        Command::Groups { action } => cmd_groups(action, data_dir),
 
         Command::ChangePassword {
             old_password,
