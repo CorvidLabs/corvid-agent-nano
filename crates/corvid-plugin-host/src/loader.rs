@@ -8,6 +8,8 @@ use corvid_plugin_sdk::{PluginManifest, TrustTier, ABI_MIN_COMPATIBLE, ABI_VERSI
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use wasmtime::{Engine, Instance, Linker, Module, Store};
 
+use crate::host_functions::algo::AlgoBackend;
+use crate::host_functions::messaging::MessagingBackend;
 use crate::host_functions::storage::StorageBackend;
 use crate::sandbox::{MemoryLimiter, SandboxLimits};
 
@@ -48,6 +50,10 @@ pub struct PluginState {
     pub plugin_id: String,
     pub storage: Option<Arc<StorageBackend>>,
     pub http_allowlist: Vec<String>,
+    pub algo: Option<Arc<AlgoBackend>>,
+    pub messaging: Option<Arc<MessagingBackend>>,
+    /// Target filter pattern from the AgentMessage capability (glob-style).
+    pub message_target_filter: Option<String>,
 }
 
 /// Current host version for min_host_version checks.
@@ -317,6 +323,9 @@ pub fn load_plugin(
             plugin_id: String::new(),
             storage: None,
             http_allowlist: Vec::new(),
+            algo: None,
+            messaging: None,
+            message_target_filter: None,
         },
     );
     store.limiter(|state| &mut state.limiter);

@@ -15,6 +15,7 @@ files:
   - crates/corvid-plugin-host/src/host_functions/algo.rs
   - crates/corvid-plugin-host/src/host_functions/http.rs
   - crates/corvid-plugin-host/src/wasm_mem.rs
+  - crates/corvid-plugin-host/src/invoke.rs
 depends_on:
   - specs/plugin/plugin-sdk.spec.md
   - specs/plugin/plugin-macros.spec.md
@@ -50,8 +51,8 @@ The Rust sidecar binary that hosts WASM plugins for corvid-agent. Runs as a sepa
 | `plugin.unload` | `{ id: string }` | `{ ok: bool }` | **Implemented** | Gracefully unload a plugin (drain + shutdown) |
 | `plugin.reload` | `{ id: string, path: string }` | `{ ok: bool, error?: string }` | **Implemented** | Hot-reload: drain → swap → activate |
 | `plugin.tools` | `{ id?: string }` | `ToolInfo[]` | **Stub** (returns `[]`) | List tools — requires WASM tool schema extraction |
-| `plugin.invoke` | `{ plugin_id: string, tool: string, input: Value }` | `{ result: string } \| { error: PluginError }` | **Planned** | Invoke a plugin tool — requires data plane |
-| `plugin.event` | `{ event: PluginEvent }` | `{ ok: bool }` | **Planned** | Dispatch event to subscribing plugins |
+| `plugin.invoke` | `{ plugin_id: string, tool: string, input: Value }` | `{ result: Value } \| { error: string }` | **Implemented** | Invoke a plugin tool via `__corvid_invoke` WASM export |
+| `plugin.event` | `{ event: PluginEvent }` | `{ ok: bool, dispatched: u32, errors: string[] }` | **Implemented** | Dispatch event to subscribing plugins via `__corvid_on_event` |
 | `health.check` | `{}` | `{ plugins: StatusMap, uptime_ms: u64 }` | **Implemented** | Health status |
 
 ### Exported Structs
@@ -62,6 +63,9 @@ The Rust sidecar binary that hosts WASM plugins for corvid-agent. Runs as a sepa
 | `CallGuard` | `registry.rs` | RAII guard tracking active calls for drain synchronization |
 | `LoadedPlugin` | `loader.rs` | Validated plugin instance with manifest and tier |
 | `SandboxLimits` | `sandbox.rs` | Per-tier memory, fuel, and timeout limits |
+| `InvokeContext` | `invoke.rs` | Shared backends for plugin tool invocations and event dispatch |
+| `AlgoBackend` | `host_functions/algo.rs` | Pluggable Algorand state query backend |
+| `MessagingBackend` | `host_functions/messaging.rs` | Pluggable agent message dispatch backend |
 
 ## Modules
 
@@ -113,9 +117,19 @@ pub struct PluginSlot {
 5. Set state to `ACTIVE`
 6. `scopeguard` ensures state resets to `ACTIVE` even if `init()` fails
 
-### executor.rs — Event Dispatch
+### executor.rs — Event Dispatch (Legacy)
 
-Routes `PluginEvent` to plugins whose `event_filter` matches the event kind. Respects `PluginSlot` state (skips draining/unloaded plugins). **Note:** Currently logs dispatch events but does not execute WASM event handlers — full WASM event calling is planned for the data plane integration.
+Routes `PluginEvent` to plugins whose `event_filter` matches the event kind. Respects `PluginSlot` state (skips draining/unloaded plugins). Legacy dispatcher that logs events without WASM execution — superseded by `invoke.rs` for real WASM event dispatch.
+
+### invoke.rs — Tool Invocation & Event Dispatch
+
+Creates per-call WASM `Store` instances with all host functions linked, then executes plugin exports:
+
+- `invoke_tool()` — calls `__corvid_invoke(tool_ptr, tool_len, input_ptr, input_len) -> ptr` to execute a plugin tool. Input/output are msgpack-serialized JSON values.
+- `dispatch_event_to_plugin()` — calls `__corvid_on_event(event_ptr, event_len) -> i32` to deliver events.
+- `InvokeContext` — holds shared backends (`StorageBackend`, `AlgoBackend`, `MessagingBackend`) passed to each invocation.
+
+Each invocation gets a fresh `Store` with fuel budget and memory limits — no state leaks between calls.
 
 ### sandbox.rs — Security Sandboxing
 
@@ -175,14 +189,14 @@ Safe read/write operations across the WASM boundary. Used by all host functions.
 
 ### host_functions/ — Capability Implementations
 
-Host function linking is implemented — capabilities are gated at instantiation time. Storage and HTTP host functions are fully implemented with WASM memory access. Algo and messaging remain stubs for Phase B.
+Host function linking is implemented — capabilities are gated at instantiation time. All four host function modules are fully implemented with WASM memory access and pluggable backends.
 
 | File | Capability | Status | Description |
 |------|-----------|--------|-------------|
 | `http.rs` | `Network` | **Implemented** | Allowlisted outbound HTTP with SSRF mitigation via `ureq` |
 | `storage.rs` | `Storage` | **Implemented** | Scoped key-value store per plugin namespace (in-memory) |
-| `algo.rs` | `AlgoRead` | **Stub** | Read Algorand application state, account info |
-| `messaging.rs` | `AgentMessage` | **Stub** | Send messages to agents matching `target_filter` |
+| `algo.rs` | `AlgoRead` | **Implemented** | Read Algorand application state via pluggable `AlgoBackend` (trait-based for testability) |
+| `messaging.rs` | `AgentMessage` | **Implemented** | Send messages to agents via pluggable `MessagingBackend` with `target_filter` enforcement |
 
 ## Invariants
 
@@ -296,3 +310,4 @@ Host function linking is implemented — capabilities are gated at instantiation
 | 2026-03-28 | CorvidAgent | Promoted to active — added implementation status markers to RPC methods, host functions, and invariants. Documented stubs (tool discovery, invoke, event dispatch, host function bodies, Ed25519 verification) |
 | 2026-03-28 | CorvidAgent | Implemented Ed25519 signature verification — detached `.sig` file format (hex pubkey + hex sig), trusted key registry at `{data_dir}/trusted-keys/*.pub` |
 | 2026-03-28 | CorvidAgent | Phase A data plane: WASM memory access layer (`wasm_mem.rs`), real `host_kv_get`/`host_kv_set` with namespace isolation, real `host_http_get`/`host_http_post` via `ureq` with SSRF+allowlist validation |
+| 2026-03-28 | CorvidAgent | Phase B data plane: `host_algo_state` with pluggable `AlgoBackend`, `host_send_message` with `MessagingBackend` + target_filter enforcement, `plugin.invoke` RPC via `__corvid_invoke` WASM export, `plugin.event` RPC via `__corvid_on_event`, `invoke.rs` execution module |

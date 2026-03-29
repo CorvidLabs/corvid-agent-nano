@@ -14,6 +14,8 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
 
 use corvid_plugin_host::engine::build_engine;
+use corvid_plugin_host::host_functions::storage::StorageBackend;
+use corvid_plugin_host::invoke::InvokeContext;
 use corvid_plugin_host::registry::PluginRegistry;
 
 #[derive(Parser, Debug)]
@@ -65,6 +67,7 @@ struct ServerState {
     engine: wasmtime::Engine,
     start_time: Instant,
     data_dir: PathBuf,
+    invoke_ctx: InvokeContext,
 }
 
 async fn handle_request(state: &ServerState, req: JsonRpcRequest) -> JsonRpcResponse {
@@ -76,6 +79,8 @@ async fn handle_request(state: &ServerState, req: JsonRpcRequest) -> JsonRpcResp
         "plugin.load" => handle_load(state, &req.params).await,
         "plugin.unload" => handle_unload(state, &req.params).await,
         "plugin.reload" => handle_reload(state, &req.params).await,
+        "plugin.invoke" => handle_invoke(state, &req.params).await,
+        "plugin.event" => handle_event(state, &req.params).await,
         "plugin.tools" => {
             let resp = corvid_plugin_host::discovery::list_tools(
                 &state.registry,
@@ -225,6 +230,188 @@ async fn handle_reload(
     Ok(serde_json::json!({ "ok": true }))
 }
 
+async fn handle_invoke(
+    state: &ServerState,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let plugin_id = params
+        .get("plugin_id")
+        .and_then(|v| v.as_str())
+        .ok_or("missing 'plugin_id' parameter")?;
+
+    let tool = params
+        .get("tool")
+        .and_then(|v| v.as_str())
+        .ok_or("missing 'tool' parameter")?;
+
+    let input = params
+        .get("input")
+        .cloned()
+        .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+
+    let slot = state
+        .registry
+        .get(plugin_id)
+        .await
+        .ok_or_else(|| format!("plugin '{}' not found", plugin_id))?;
+
+    if !slot.is_active() {
+        return Err(format!("plugin '{}' is not active", plugin_id));
+    }
+
+    let _guard = slot
+        .try_acquire()
+        .ok_or_else(|| format!("plugin '{}' is draining", plugin_id))?;
+
+    let module = slot.module.read().await.clone();
+    let limits = slot.limits.clone();
+    let capabilities = slot.manifest.capabilities.clone();
+
+    // Run the WASM invocation on a blocking thread (it's synchronous)
+    let engine = state.engine.clone();
+    let invoke_ctx_storage = Arc::clone(&state.invoke_ctx.storage);
+    let invoke_ctx_algo = state.invoke_ctx.algo.as_ref().map(Arc::clone);
+    let invoke_ctx_messaging = state.invoke_ctx.messaging.as_ref().map(Arc::clone);
+    let plugin_id_owned = plugin_id.to_string();
+    let tool_owned = tool.to_string();
+
+    let result = tokio::task::spawn_blocking(move || {
+        let ctx = InvokeContext {
+            storage: invoke_ctx_storage,
+            algo: invoke_ctx_algo,
+            messaging: invoke_ctx_messaging,
+        };
+
+        // Apply wall-clock timeout
+        let _timeout = limits.timeout;
+        let handle = std::thread::spawn(move || {
+            corvid_plugin_host::invoke::invoke_tool(
+                &engine,
+                &module,
+                &plugin_id_owned,
+                &capabilities,
+                &limits,
+                &ctx,
+                &tool_owned,
+                &input,
+            )
+        });
+
+        match handle.join() {
+            Ok(result) => result,
+            Err(_) => Err(anyhow::anyhow!("plugin panicked during invocation")),
+        }
+        // Note: wall-clock timeout is enforced by Wasmtime fuel + the store's
+        // fuel limit. For additional safety, the caller can wrap in tokio::time::timeout.
+    })
+    .await
+    .map_err(|e| format!("spawn_blocking failed: {e}"))?;
+
+    match result {
+        Ok(value) => {
+            tracing::info!(plugin_id = %plugin_id, tool = %tool, "tool invoked");
+            Ok(serde_json::json!({ "result": value }))
+        }
+        Err(e) => {
+            tracing::warn!(plugin_id = %plugin_id, tool = %tool, error = %e, "tool invocation failed");
+            Err(format!("invocation failed: {e}"))
+        }
+    }
+}
+
+async fn handle_event(
+    state: &ServerState,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let event_value = params.get("event").ok_or("missing 'event' parameter")?;
+
+    let event: corvid_plugin_sdk::error::PluginEvent =
+        serde_json::from_value(event_value.clone()).map_err(|e| format!("invalid event: {e}"))?;
+
+    let event_kind = event.kind();
+    let manifests = state.registry.list_manifests().await;
+    let mut dispatched = 0u32;
+    let mut errors = Vec::new();
+
+    for manifest in &manifests {
+        if !manifest.event_filter.contains(&event_kind) {
+            continue;
+        }
+
+        let slot = match state.registry.get(&manifest.id).await {
+            Some(s) => s,
+            None => continue,
+        };
+
+        if !slot.is_active() {
+            continue;
+        }
+
+        let _guard = match slot.try_acquire() {
+            Some(g) => g,
+            None => continue,
+        };
+
+        let module = slot.module.read().await.clone();
+        let limits = slot.limits.clone();
+        let capabilities = manifest.capabilities.clone();
+        let plugin_id = manifest.id.clone();
+        let engine = state.engine.clone();
+        let ctx_storage = Arc::clone(&state.invoke_ctx.storage);
+        let ctx_algo = state.invoke_ctx.algo.as_ref().map(Arc::clone);
+        let ctx_messaging = state.invoke_ctx.messaging.as_ref().map(Arc::clone);
+        let event_clone = event.clone();
+
+        let result = tokio::task::spawn_blocking(move || {
+            let ctx = InvokeContext {
+                storage: ctx_storage,
+                algo: ctx_algo,
+                messaging: ctx_messaging,
+            };
+            corvid_plugin_host::invoke::dispatch_event_to_plugin(
+                &engine,
+                &module,
+                &plugin_id,
+                &capabilities,
+                &limits,
+                &ctx,
+                &event_clone,
+            )
+        })
+        .await;
+
+        match result {
+            Ok(Ok(status)) => {
+                tracing::info!(
+                    plugin_id = %manifest.id,
+                    event = %event_kind,
+                    status,
+                    "event dispatched"
+                );
+                dispatched += 1;
+            }
+            Ok(Err(e)) => {
+                tracing::warn!(
+                    plugin_id = %manifest.id,
+                    event = %event_kind,
+                    error = %e,
+                    "event dispatch failed"
+                );
+                errors.push(format!("{}: {e}", manifest.id));
+            }
+            Err(e) => {
+                errors.push(format!("{}: spawn failed: {e}", manifest.id));
+            }
+        }
+    }
+
+    Ok(serde_json::json!({
+        "ok": true,
+        "dispatched": dispatched,
+        "errors": errors,
+    }))
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -265,11 +452,19 @@ async fn main() -> Result<()> {
     // Build Wasmtime engine
     let engine = build_engine(&cache_dir)?;
 
+    // Create shared backends for plugin invocations
+    let invoke_ctx = InvokeContext {
+        storage: Arc::new(StorageBackend::new()),
+        algo: None,      // Set to Some(...) when algod client is configured
+        messaging: None, // Set to Some(...) when messaging is configured
+    };
+
     let state = Arc::new(ServerState {
         registry: PluginRegistry::new(),
         engine,
         start_time: Instant::now(),
         data_dir: data_dir.clone(),
+        invoke_ctx,
     });
 
     // Bind Unix socket

@@ -7,12 +7,14 @@ pub mod discovery;
 pub mod engine;
 pub mod executor;
 pub mod host_functions;
+pub mod invoke;
 pub mod loader;
 pub mod registry;
 pub mod sandbox;
 pub mod wasm_mem;
 
 pub use engine::build_engine;
+pub use invoke::InvokeContext;
 pub use loader::{LoadError, LoadedPlugin};
 pub use registry::{CallGuard, PluginRegistry, PluginSlot};
 pub use sandbox::SandboxLimits;
