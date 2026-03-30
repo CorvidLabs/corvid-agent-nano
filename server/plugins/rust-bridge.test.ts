@@ -65,6 +65,14 @@ class MockPluginHost {
     }
   }
 
+  /** Broadcast a server-pushed notification to all connected clients. */
+  broadcast(message: unknown): void {
+    const line = JSON.stringify(message) + "\n";
+    for (const client of this.clients) {
+      client.write(line);
+    }
+  }
+
   async stop(): Promise<void> {
     for (const c of this.clients) c.destroy();
     this.clients = [];
@@ -106,7 +114,7 @@ describe("PluginBridge", () => {
     host = new MockPluginHost();
     registry = new MockToolRegistry();
 
-    // Default handlers
+    // Default handlers — wire format uses snake_case (Rust serialization)
     host.handlers["plugin.list"] = () => ({
       plugins: [
         {
@@ -161,11 +169,27 @@ describe("PluginBridge", () => {
     expect(manifests[0].version).toBe("1.0.0");
   });
 
+  test("listManifests maps trust_tier to trustTier (camelCase)", async () => {
+    await bridge.connect(host.socketPath);
+    const manifests = await bridge.listManifests();
+    expect(manifests[0].trustTier).toBe("trusted");
+    // Wire field should not be present on public type
+    expect((manifests[0] as unknown as Record<string, unknown>).trust_tier).toBeUndefined();
+  });
+
   test("listTools returns tool info", async () => {
     await bridge.connect(host.socketPath);
     const tools = await bridge.listTools();
     expect(tools).toHaveLength(1);
     expect(tools[0].name).toBe("set_threshold");
+  });
+
+  test("listTools maps input_schema to inputSchema (camelCase)", async () => {
+    await bridge.connect(host.socketPath);
+    const tools = await bridge.listTools();
+    expect(tools[0].inputSchema).toEqual({ type: "object", properties: { value: { type: "number" } } });
+    // Wire field should not be present on public type
+    expect((tools[0] as unknown as Record<string, unknown>).input_schema).toBeUndefined();
   });
 
   test("healthCheck returns status", async () => {
@@ -250,6 +274,86 @@ describe("PluginBridge", () => {
     for (const name of names) {
       expect(name).toMatch(/^plugin:[^:]+:[^:]+$/);
     }
+  });
+
+  test("plugin.tools_registered notification registers tools", async () => {
+    // Start with no tools from initial fetch
+    host.handlers["plugin.tools"] = () => ({ tools: [] });
+
+    await bridge.connect(host.socketPath);
+    await new Promise((r) => setTimeout(r, 100));
+    expect(registry.tools.size).toBe(0);
+
+    // Server pushes a tools_registered notification
+    host.broadcast({
+      event: "plugin.tools_registered",
+      pluginId: "corvid-algo-oracle",
+      trust_tier: "trusted",
+      tools: [
+        {
+          name: "set_threshold",
+          description: "Set the oracle threshold",
+          input_schema: { type: "object" },
+        },
+      ],
+    });
+
+    await new Promise((r) => setTimeout(r, 50));
+    expect(registry.tools.has("plugin:corvid-algo-oracle:set_threshold")).toBe(true);
+  });
+
+  test("plugin.tools_registered notification replaces only that plugin's tools", async () => {
+    // Register two plugins up front
+    host.handlers["plugin.list"] = () => ({
+      plugins: [
+        { id: "plugin-a", version: "1.0.0", author: "x", description: "a", capabilities: [], trust_tier: "trusted", tools: [] },
+        { id: "plugin-b", version: "1.0.0", author: "x", description: "b", capabilities: [], trust_tier: "trusted", tools: [] },
+      ],
+    });
+    host.handlers["plugin.tools"] = () => ({
+      tools: [
+        { plugin_id: "plugin-a", tool: { name: "tool-a1", description: "a1", input_schema: {} } },
+        { plugin_id: "plugin-b", tool: { name: "tool-b1", description: "b1", input_schema: {} } },
+      ],
+    });
+
+    await bridge.connect(host.socketPath);
+    await new Promise((r) => setTimeout(r, 100));
+
+    expect(registry.tools.has("plugin:plugin-a:tool-a1")).toBe(true);
+    expect(registry.tools.has("plugin:plugin-b:tool-b1")).toBe(true);
+
+    // Hot-reload plugin-a with new tools
+    host.broadcast({
+      event: "plugin.tools_registered",
+      pluginId: "plugin-a",
+      trust_tier: "trusted",
+      tools: [
+        { name: "tool-a2", description: "a2 new", input_schema: {} },
+      ],
+    });
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    // plugin-a tools replaced
+    expect(registry.tools.has("plugin:plugin-a:tool-a1")).toBe(false);
+    expect(registry.tools.has("plugin:plugin-a:tool-a2")).toBe(true);
+    // plugin-b untouched
+    expect(registry.tools.has("plugin:plugin-b:tool-b1")).toBe(true);
+  });
+
+  test("plugin.tools_registered notification without pluginId is ignored", async () => {
+    host.handlers["plugin.tools"] = () => ({ tools: [] });
+
+    await bridge.connect(host.socketPath);
+    await new Promise((r) => setTimeout(r, 100));
+
+    // Malformed notification — no pluginId
+    host.broadcast({ event: "plugin.tools_registered", tools: [] });
+    await new Promise((r) => setTimeout(r, 50));
+
+    // No crash, no tools registered
+    expect(registry.tools.size).toBe(0);
   });
 });
 
