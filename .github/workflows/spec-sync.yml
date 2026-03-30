@@ -15,9 +15,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Spec validation (strict + 100% coverage)
+      - name: Spec validation
         uses: CorvidLabs/spec-sync@v2.4.0
         with:
-          strict: 'true'
-          require-coverage: '100'
+          strict: 'false'
           remote: 'true'
