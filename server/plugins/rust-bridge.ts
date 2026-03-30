@@ -4,12 +4,13 @@
  * Communicates over Unix domain socket using newline-delimited JSON-RPC.
  * Auto-registers plugin tools into the agent tool registry on connect.
  * Reconnects with exponential backoff if the socket drops.
+ * Handles push notifications for hot-reload of individual plugin tools.
  */
 
 import { connect, type Socket } from "node:net";
-import { encode, decode } from "@msgpack/msgpack";
+import { encode } from "@msgpack/msgpack";
 
-// ── Types ──────────────────────────────────────────────────────────────
+// ── Public types (camelCase, TypeScript conventions) ───────────────────
 
 export interface PluginManifest {
   id: string;
@@ -17,14 +18,14 @@ export interface PluginManifest {
   author: string;
   description: string;
   capabilities: string[];
-  trust_tier: "trusted" | "verified" | "untrusted";
+  trustTier: "trusted" | "verified" | "untrusted";
   tools: ToolInfo[];
 }
 
 export interface ToolInfo {
   name: string;
   description: string;
-  input_schema: Record<string, unknown>;
+  inputSchema: Record<string, unknown>;
 }
 
 export interface HealthStatus {
@@ -39,6 +40,26 @@ export interface PluginEvent {
   payload: unknown;
 }
 
+// ── Wire types (snake_case, matching Rust serialization) ───────────────
+
+interface WirePluginManifest {
+  id: string;
+  version: string;
+  author: string;
+  description: string;
+  capabilities: string[];
+  trust_tier: "trusted" | "verified" | "untrusted";
+  tools: WireToolInfo[];
+}
+
+interface WireToolInfo {
+  name: string;
+  description: string;
+  input_schema: Record<string, unknown>;
+}
+
+// ── JSON-RPC types ─────────────────────────────────────────────────────
+
 interface JsonRpcRequest {
   method: string;
   params: unknown;
@@ -49,6 +70,13 @@ interface JsonRpcResponse {
   result?: unknown;
   error?: string;
   id: number | null;
+}
+
+interface JsonRpcNotification {
+  event: string;
+  pluginId?: string;
+  trust_tier?: string;
+  tools?: WireToolInfo[];
 }
 
 type ToolRegistry = {
@@ -83,6 +111,7 @@ export class PluginBridge {
   private closed = false;
   private toolRegistry: ToolRegistry | null = null;
   private registeredTools = new Set<string>();
+  private pluginToolsByPlugin = new Map<string, Set<string>>();
   private pluginTiers = new Map<string, string>();
 
   constructor(opts?: { reconnectMax?: number; toolRegistry?: ToolRegistry }) {
@@ -119,16 +148,16 @@ export class PluginBridge {
   /** List all loaded plugin manifests. */
   async listManifests(): Promise<PluginManifest[]> {
     const resp = await this.rpc("plugin.list", {});
-    const data = resp as { plugins?: PluginManifest[] };
-    return data.plugins ?? [];
+    const data = resp as { plugins?: WirePluginManifest[] };
+    return (data.plugins ?? []).map(mapManifest);
   }
 
   /** List tools (all or filtered by plugin). */
   async listTools(pluginId?: string): Promise<ToolInfo[]> {
     const params = pluginId ? { id: pluginId } : {};
     const resp = await this.rpc("plugin.tools", params);
-    const data = resp as { tools?: Array<{ plugin_id: string; tool: ToolInfo }> };
-    return (data.tools ?? []).map((t) => t.tool);
+    const data = resp as { tools?: Array<{ plugin_id: string; tool: WireToolInfo }> };
+    return (data.tools ?? []).map((t) => mapTool(t.tool));
   }
 
   /** Invoke a plugin tool. Uses MessagePack for the payload. */
@@ -184,29 +213,54 @@ export class PluginBridge {
   async refreshTools(): Promise<void> {
     if (!this.toolRegistry) return;
 
-    // Unregister stale tools
+    // Unregister all stale tools
     this.unregisterAllTools();
 
     // Fetch manifests to get tier info
     const manifests = await this.listManifests();
     for (const m of manifests) {
-      this.pluginTiers.set(m.id, m.trust_tier);
+      this.pluginTiers.set(m.id, m.trustTier);
     }
 
     // Fetch all tools and register them
     const resp = await this.rpc("plugin.tools", {});
-    const data = resp as { tools?: Array<{ plugin_id: string; tool: ToolInfo }> };
-
+    const data = resp as { tools?: Array<{ plugin_id: string; tool: WireToolInfo }> };
     for (const entry of data.tools ?? []) {
-      const toolName = `plugin:${entry.plugin_id}:${entry.tool.name}`;
-      this.toolRegistry.register({
-        name: toolName,
-        description: entry.tool.description,
-        inputSchema: entry.tool.input_schema,
-        execute: (input) => this.invoke(entry.plugin_id, entry.tool.name, input),
-      });
-      this.registeredTools.add(toolName);
+      this.registerPluginTool(entry.plugin_id, entry.tool);
     }
+  }
+
+  /** Refresh tools for a single plugin (hot-reload). Only touches that plugin's tools. */
+  private refreshPluginTools(pluginId: string, rawTools: WireToolInfo[]): void {
+    if (!this.toolRegistry) return;
+
+    // Unregister old tools for this plugin only
+    const oldTools = this.pluginToolsByPlugin.get(pluginId) ?? new Set();
+    for (const toolName of oldTools) {
+      this.toolRegistry.unregister(toolName);
+      this.registeredTools.delete(toolName);
+    }
+    this.pluginToolsByPlugin.delete(pluginId);
+
+    // Register new tools
+    for (const tool of rawTools) {
+      this.registerPluginTool(pluginId, tool);
+    }
+  }
+
+  private registerPluginTool(pluginId: string, rawTool: WireToolInfo): void {
+    if (!this.toolRegistry) return;
+    const toolName = `plugin:${pluginId}:${rawTool.name}`;
+    this.toolRegistry.register({
+      name: toolName,
+      description: rawTool.description,
+      inputSchema: rawTool.input_schema,
+      execute: (input) => this.invoke(pluginId, rawTool.name, input),
+    });
+    this.registeredTools.add(toolName);
+    const pluginTools = this.pluginToolsByPlugin.get(pluginId) ?? new Set();
+    pluginTools.add(toolName);
+    this.pluginToolsByPlugin.set(pluginId, pluginTools);
   }
 
   private unregisterAllTools(): void {
@@ -215,6 +269,7 @@ export class PluginBridge {
       this.toolRegistry.unregister(name);
     }
     this.registeredTools.clear();
+    this.pluginToolsByPlugin.clear();
   }
 
   // ── JSON-RPC transport ─────────────────────────────────────────────
@@ -262,7 +317,16 @@ export class PluginBridge {
       if (!line.trim()) continue;
 
       try {
-        const resp: JsonRpcResponse = JSON.parse(line);
+        const msg = JSON.parse(line) as Record<string, unknown>;
+
+        // Server-pushed notification: has "event" field, no numeric id
+        if (typeof msg.event === "string") {
+          this.handleNotification(msg as unknown as JsonRpcNotification);
+          continue;
+        }
+
+        // RPC response
+        const resp = msg as unknown as JsonRpcResponse;
         if (resp.id != null && this.pending.has(resp.id)) {
           const { resolve, reject } = this.pending.get(resp.id)!;
           this.pending.delete(resp.id);
@@ -275,6 +339,20 @@ export class PluginBridge {
       } catch {
         // Ignore malformed lines
       }
+    }
+  }
+
+  private handleNotification(notification: JsonRpcNotification): void {
+    if (notification.event === "plugin.tools_registered") {
+      const { pluginId, tools } = notification;
+      if (!pluginId || !tools) return;
+
+      // Update tier from notification if provided
+      if (notification.trust_tier) {
+        this.pluginTiers.set(pluginId, notification.trust_tier);
+      }
+
+      this.refreshPluginTools(pluginId, tools);
     }
   }
 
@@ -292,10 +370,12 @@ export class PluginBridge {
         socket.setEncoding("utf-8");
         socket.on("data", (data) => this.handleData(data as string));
 
-        // Auto-register tools on connect
-        this.refreshTools().catch((err) =>
-          console.warn("[plugin-bridge] tool refresh failed:", err.message),
-        );
+        // Auto-register tools on connect — suppress warning if bridge closed before completing
+        this.refreshTools().catch((err) => {
+          if (!this.closed) {
+            console.warn("[plugin-bridge] tool refresh failed:", err.message);
+          }
+        });
 
         resolve();
       });
@@ -337,4 +417,26 @@ export class PluginBridge {
       });
     }, this.reconnectMs);
   }
+}
+
+// ── Wire → public type mapping ─────────────────────────────────────────
+
+function mapManifest(wire: WirePluginManifest): PluginManifest {
+  return {
+    id: wire.id,
+    version: wire.version,
+    author: wire.author,
+    description: wire.description,
+    capabilities: wire.capabilities,
+    trustTier: wire.trust_tier,
+    tools: wire.tools.map(mapTool),
+  };
+}
+
+function mapTool(wire: WireToolInfo): ToolInfo {
+  return {
+    name: wire.name,
+    description: wire.description,
+    inputSchema: wire.input_schema,
+  };
 }
