@@ -1,6 +1,6 @@
 ---
 module: core
-version: 3
+version: 4
 status: active
 files:
   - src/agent.rs
@@ -13,26 +13,15 @@ depends_on:
 
 ## Purpose
 
-Shared types and data structures used across all corvid-agent-nano crates. Provides the foundational domain model: agent identity, AlgoChat messages, and runtime configuration. Re-exports the external `algochat` crate (from `rs-algochat`) which provides X25519 key derivation, ChaCha20-Poly1305 encryption, and the full AlgoChat protocol. The local `corvid-crypto` and `corvid-algochat` crates have been replaced by this external dependency.
+Agent message loop and SQLite-backed persistent storage. The agent module polls for AlgoChat messages, forwards them to the hub, and sends encrypted replies on-chain. The storage module provides `EncryptionKeyStorage` and `MessageCache` trait implementations backed by SQLite, so encryption keys and message history survive restarts.
 
 ## Public API
-
-### Exported Modules
-
-| Module | Description |
-|--------|-------------|
-| `agent` | Agent identity type |
-| `config` | Runtime configuration type |
-| `message` | Message type |
-| `storage` | SQLite-backed persistent storage implementations |
 
 ### Exported Structs
 
 | Struct | Description |
 |--------|-------------|
-| `AgentIdentity` | An agent's on-chain identity: Algorand address, name, X25519 public key, and capabilities |
-| `Message` | A decrypted AlgoChat message with sender, recipient, content, timestamp, and optional txid |
-| `NanoConfig` | Runtime configuration: Algorand node URL/token, agent name, hub URL, data directory |
+| `AgentLoopConfig` | Configuration for the agent message loop: poll interval, hub URL, agent name/address, signing key |
 | `SqliteKeyStorage` | Persistent X25519 private key storage backed by SQLite |
 | `SqliteMessageCache` | Persistent message cache and sync-round bookmarks backed by SQLite |
 
@@ -40,37 +29,20 @@ Shared types and data structures used across all corvid-agent-nano crates. Provi
 
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
+| `run_message_loop` | `client: Arc<AlgoChat<A,I,S,M>>`, `algod: Arc<A>`, `config: AgentLoopConfig` | `()` (runs forever) | Polls for AlgoChat messages, forwards to hub, sends encrypted replies on-chain |
+| `send_reply` | `client`, `algod`, `sender_address`, `recipient_address`, `message`, `signing_key` | `anyhow::Result<String>` | Encrypt a message (PSK or X25519) and send it on-chain, returns txid |
 | `open` | `path: impl AsRef<Path>` | `algochat::Result<Self>` | Open or create a SQLite database at the given file path (on both `SqliteKeyStorage` and `SqliteMessageCache`) |
 | `in_memory` | — | `algochat::Result<Self>` | Create an in-memory database for testing (on both `SqliteKeyStorage` and `SqliteMessageCache`) |
 
-### AgentIdentity Fields
+### AgentLoopConfig Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `address` | `String` | Algorand address |
-| `name` | `String` | Human-readable agent name |
-| `public_key` | `String` | X25519 public key (base64-encoded) |
-| `capabilities` | `Vec<String>` | Agent capability tags for discovery |
-
-### Message Fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `from` | `String` | Sender's Algorand address |
-| `to` | `String` | Recipient's Algorand address |
-| `content` | `String` | Decrypted message body |
-| `timestamp` | `u64` | Unix timestamp |
-| `txid` | `Option<String>` | Algorand transaction ID (None for outgoing pre-send) |
-
-### NanoConfig Fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `algod_url` | `String` | Algorand node REST API URL |
-| `algod_token` | `String` | Algorand node API token |
+| `poll_interval_secs` | `u64` | How often to poll for new messages (seconds) |
+| `hub_url` | `Option<String>` | Hub URL for corvid-agent API. None = P2P mode (no hub forwarding) |
 | `agent_name` | `String` | Agent display name |
-| `hub_url` | `String` | corvid-agent hub API URL |
-| `data_dir` | `String` | Local data directory path |
+| `agent_address` | `String` | Agent's Algorand address (for sending replies) |
+| `signing_key` | `SigningKey` | Ed25519 signing key (for signing reply transactions) |
 
 ### SQLite Storage (storage.rs)
 
@@ -125,45 +97,29 @@ Shared types and data structures used across all corvid-agent-nano crates. Provi
 - `participant TEXT PRIMARY KEY` — Conversation partner address
 - `last_round INTEGER NOT NULL` — Last synced Algorand round
 
-### Re-exports (lib.rs)
-
-| Symbol | Source | Description |
-|--------|--------|-------------|
-| `AgentIdentity` | `agent::AgentIdentity` | Re-exported for convenience |
-| `Message` | `message::Message` | Re-exported for convenience |
-
 ## Invariants
 
-1. All structs derive `Debug`, `Clone`, `Serialize`, `Deserialize` — they must be printable, cloneable, and serializable to/from JSON
-2. `AgentIdentity.public_key` must be a valid base64-encoded 32-byte X25519 public key when used in crypto operations
-3. `Message.txid` is `None` for outgoing messages before submission, `Some(txid)` for confirmed on-chain messages
-4. `NanoConfig.algod_url` must be a valid HTTP(S) URL
-5. `lib.rs` re-exports `AgentIdentity` and `Message` but NOT `NanoConfig` (config is accessed via `config::NanoConfig`)
-6. `lib.rs` re-exports the external `algochat` crate for convenient access to crypto and protocol types
-7. `SqliteKeyStorage` and `SqliteMessageCache` use `Mutex<Connection>` for thread safety — safe to share across async tasks
-8. Message deduplication is enforced by `INSERT OR IGNORE` on the transaction ID primary key
-9. Key overwrites are allowed via `INSERT OR REPLACE` — storing a key for an existing address replaces it
-10. Database tables are created on open (`CREATE TABLE IF NOT EXISTS`) — no separate migration step needed
+1. `SqliteKeyStorage` and `SqliteMessageCache` use `Mutex<Connection>` for thread safety — safe to share across async tasks
+2. Message deduplication is enforced by `INSERT OR IGNORE` on the transaction ID primary key
+3. Key overwrites are allowed via `INSERT OR REPLACE` — storing a key for an existing address replaces it
+4. Database tables are created on open (`CREATE TABLE IF NOT EXISTS`) — no separate migration step needed
+5. `AgentLoopConfig` defaults to 5s poll interval, hub at `http://localhost:3578`, agent name "can"
+6. `run_message_loop` runs forever — it never returns under normal operation
+7. `send_reply` tries PSK encryption first, falls back to X25519 key discovery if no PSK contact found
 
 ## Behavioral Examples
 
-### Scenario: Serialize and deserialize an AgentIdentity
+### Scenario: Default AgentLoopConfig
 
-- **Given** an `AgentIdentity` with name "nano-test", a valid Algorand address, a base64 X25519 public key, and capabilities `["messaging"]`
-- **When** serialized to JSON via `serde_json::to_string` and deserialized back
-- **Then** the roundtrip produces an identical struct
+- **Given** `AgentLoopConfig::default()`
+- **When** inspected
+- **Then** `poll_interval_secs` is 5, `hub_url` is `Some("http://localhost:3578")`, `agent_name` is "can"
 
-### Scenario: Create a pre-send message
+### Scenario: P2P mode (no hub)
 
-- **Given** a sender address and recipient address
-- **When** a `Message` is constructed with `txid: None`
-- **Then** it represents an outgoing message not yet submitted to the chain
-
-### Scenario: NanoConfig with defaults
-
-- **Given** CLI defaults (localnet algod, default hub URL)
-- **When** a `NanoConfig` is constructed
-- **Then** `algod_url` is `http://localhost:4001`, `hub_url` is `http://localhost:3578`
+- **Given** an `AgentLoopConfig` with `hub_url: None`
+- **When** `run_message_loop` is started
+- **Then** messages are received and stored but not forwarded to any hub
 
 ### Scenario: Persistent message cache survives restart
 
@@ -182,8 +138,9 @@ Shared types and data structures used across all corvid-agent-nano crates. Provi
 
 | Condition | Behavior |
 |-----------|----------|
-| Invalid base64 in `public_key` | Downstream crypto operations fail — core does not validate at construction |
-| Empty `agent_name` | Allowed at the type level; validation is the caller's responsibility |
+| Hub unreachable during message loop | Sends `[error] Agent hub is unreachable` reply on-chain, continues polling |
+| Hub task times out or fails | Sends `[error] Agent did not produce a response` reply on-chain, continues polling |
+| No PSK contact and no X25519 key found for recipient | `send_reply` returns `Err` ("No encryption key found for {address}") |
 | SQLite database file cannot be opened | `SqliteKeyStorage::open` / `SqliteMessageCache::open` returns `AlgoChatError::StorageFailed` |
 | Key not found in SQLite storage | `retrieve()` returns `AlgoChatError::KeyNotFound(address)` |
 | Corrupt key blob (wrong length) | `retrieve()` returns `AlgoChatError::StorageFailed("Invalid key length")` |
@@ -194,16 +151,19 @@ Shared types and data structures used across all corvid-agent-nano crates. Provi
 
 | Module | What is used |
 |--------|-------------|
+| `algochat` (external, git: rs-algochat) | `AlgoChat`, `AlgodClient`, `IndexerClient`, `EncryptionKeyStorage`, `MessageCache`, `Message` types and traits |
+| `ed25519_dalek` | `SigningKey` for signing Algorand transactions |
 | `serde` | `Serialize`, `Deserialize` derive macros |
-| `algochat` (external, git: rs-algochat) | Re-exported for crypto, key derivation, and AlgoChat protocol |
+| `reqwest` | HTTP client for hub communication |
 | `rusqlite` | SQLite database access for persistent storage |
 | `async-trait` | Async trait implementations for storage traits |
+| `anyhow` | Error handling in `send_reply` |
 
 ### Consumed By
 
 | Module | What is used |
 |--------|-------------|
-| `src/main.rs` | `NanoConfig` for runtime configuration, `algochat` re-export for crypto/protocol |
+| `src/main.rs` | `AgentLoopConfig`, `run_message_loop` for agent startup; `SqliteKeyStorage`, `SqliteMessageCache` for persistence |
 
 ## Change Log
 
@@ -213,3 +173,4 @@ Shared types and data structures used across all corvid-agent-nano crates. Provi
 | 2026-03-28 | CorvidAgent | Replace local crypto/algochat crates with external rs-algochat dependency |
 | 2026-03-28 | CorvidAgent | Add SQLite storage module: SqliteKeyStorage + SqliteMessageCache with 16 tests |
 | 2026-03-28 | CorvidAgent | Add Exported Modules/Functions sections for spec-sync strict compliance |
+| 2026-03-30 | CorvidAgent | Rewrite spec to match current source: remove old types (AgentIdentity, Message, NanoConfig), add AgentLoopConfig, run_message_loop, send_reply |
