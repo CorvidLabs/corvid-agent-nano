@@ -33,6 +33,7 @@
 - [Group Channels](./guides/group-channels.md)
 - [P2P Mode](./guides/p2p-mode.md)
 - [Plugins (WASM)](./guides/plugins.md)
+- [Plugin Development](./guides/plugin-development.md)
 
 # Architecture
 
@@ -44,3 +45,4 @@
 
 - [Environment Variables](./reference/environment-variables.md)
 - [Troubleshooting](./reference/troubleshooting.md)
+- [FAQ](./reference/faq.md)
