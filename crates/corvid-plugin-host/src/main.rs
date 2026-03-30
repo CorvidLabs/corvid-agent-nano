@@ -293,37 +293,49 @@ async fn handle_invoke(
     let invoke_ctx_messaging = state.invoke_ctx.messaging.as_ref().map(Arc::clone);
     let plugin_id_owned = plugin_id.to_string();
     let tool_owned = tool.to_string();
+    let wall_clock_timeout = limits.timeout;
 
-    let result = tokio::task::spawn_blocking(move || {
-        let ctx = InvokeContext {
-            storage: invoke_ctx_storage,
-            algo: invoke_ctx_algo,
-            messaging: invoke_ctx_messaging,
-        };
+    // Enforce the per-tier wall-clock timeout.  Fuel limits bound CPU, but not
+    // time spent inside host functions (HTTP, storage I/O).  tokio::time::timeout
+    // stops *awaiting* the result after the deadline; the blocking thread will
+    // eventually finish once Wasmtime exhausts its fuel or the host function
+    // returns, but we no longer block the caller.
+    let result = tokio::time::timeout(
+        wall_clock_timeout,
+        tokio::task::spawn_blocking(move || {
+            let ctx = InvokeContext {
+                storage: invoke_ctx_storage,
+                algo: invoke_ctx_algo,
+                messaging: invoke_ctx_messaging,
+            };
 
-        // Apply wall-clock timeout
-        let _timeout = limits.timeout;
-        let handle = std::thread::spawn(move || {
-            corvid_plugin_host::invoke::invoke_tool(
-                &engine,
-                &module,
-                &plugin_id_owned,
-                &capabilities,
-                &limits,
-                &ctx,
-                &tool_owned,
-                &input,
-            )
-        });
+            let handle = std::thread::spawn(move || {
+                corvid_plugin_host::invoke::invoke_tool(
+                    &engine,
+                    &module,
+                    &plugin_id_owned,
+                    &capabilities,
+                    &limits,
+                    &ctx,
+                    &tool_owned,
+                    &input,
+                )
+            });
 
-        match handle.join() {
-            Ok(result) => result,
-            Err(_) => Err(anyhow::anyhow!("plugin panicked during invocation")),
-        }
-        // Note: wall-clock timeout is enforced by Wasmtime fuel + the store's
-        // fuel limit. For additional safety, the caller can wrap in tokio::time::timeout.
-    })
+            match handle.join() {
+                Ok(result) => result,
+                Err(_) => Err(anyhow::anyhow!("plugin panicked during invocation")),
+            }
+        }),
+    )
     .await
+    .map_err(|_| {
+        format!(
+            "plugin '{}' timed out after {}ms",
+            plugin_id,
+            wall_clock_timeout.as_millis()
+        )
+    })?
     .map_err(|e| format!("spawn_blocking failed: {e}"))?;
 
     match result {
