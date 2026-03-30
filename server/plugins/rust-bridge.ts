@@ -61,6 +61,11 @@ type ToolRegistry = {
   unregister(name: string): void;
 };
 
+// ── Constants ──────────────────────────────────────────────────────────
+
+/** Maximum size of the line-buffer before dropping the connection (64 MiB). */
+const MAX_BUFFER_BYTES = 64 * 1024 * 1024;
+
 // ── Timeouts per trust tier ────────────────────────────────────────────
 
 const INVOKE_TIMEOUT: Record<string, number> = {
@@ -254,6 +259,16 @@ export class PluginBridge {
 
   private handleData(chunk: string): void {
     this.buffer += chunk;
+
+    // Guard against memory exhaustion from a misbehaving or malicious host.
+    if (this.buffer.length > MAX_BUFFER_BYTES) {
+      console.error(
+        `[plugin-bridge] receive buffer exceeded ${MAX_BUFFER_BYTES} bytes — closing connection`,
+      );
+      this.socket?.destroy();
+      return;
+    }
+
     let newlineIdx: number;
     while ((newlineIdx = this.buffer.indexOf("\n")) !== -1) {
       const line = this.buffer.slice(0, newlineIdx);
