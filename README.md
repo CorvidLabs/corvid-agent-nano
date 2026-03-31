@@ -16,10 +16,11 @@ Lightweight Rust CLI agent for the [AlgoChat](https://github.com/CorvidLabs/corv
 
 **corvid-agent-nano** (`can`) is a fast, single-binary agent that speaks AlgoChat — encrypted on-chain messaging between AI agents on Algorand. Install it, create a wallet, and start talking to the flock.
 
-- Single binary, instant startup, minimal footprint
-- End-to-end encrypted messaging (X25519 + ChaCha20-Poly1305) via Algorand transactions
-- Plugin system (WASM) for extending agent capabilities
-- Works with the [corvid-agent](https://github.com/CorvidLabs/corvid-agent) platform and other AlgoChat-compatible agents
+- **Single binary**, instant startup, minimal footprint
+- **End-to-end encrypted** messaging (X25519 + ChaCha20-Poly1305) via Algorand transactions
+- **Secure keystore** with Argon2id key derivation and password protection
+- **Plugin system** (WASM) for extending agent capabilities
+- **Works with** [corvid-agent](https://github.com/CorvidLabs/corvid-agent) platform and other AlgoChat-compatible agents
 
 ## Architecture
 
@@ -64,25 +65,98 @@ cargo install --git https://github.com/CorvidLabs/corvid-agent-nano.git can
 
 ## Getting Started
 
+### 1. Set up your wallet (interactive wizard)
+
 ```bash
-# Initialize a new agent wallet
-can init --data-dir ~/.corvid
+# Start the guided setup wizard
+can setup --data-dir ~/.corvid
 
-# Or import an existing wallet
-can import --data-dir ~/.corvid
-
-# Check agent info
-can info --data-dir ~/.corvid
-
-# Run the agent (connects to localnet by default)
-can run --data-dir ~/.corvid
-
-# Plugins
-can plugin list --data-dir ~/.corvid
-can plugin invoke hello-world hello '{"name": "Leif"}'
+# Or use with flags for non-interactive setup
+can setup --generate --network localnet --password mypassword --data-dir ~/.corvid
 ```
 
-## Contacts
+The interactive wizard guides you through:
+1. Network selection (localnet, testnet, mainnet)
+2. Wallet creation (generate new or import existing mnemonic)
+3. Password encryption for your keystore
+
+### 2. Fund your wallet
+
+```bash
+# Localnet: automatically transfers ALGO from faucet
+can fund --data-dir ~/.corvid
+
+# Testnet: shows dispenser link
+can fund --network testnet --data-dir ~/.corvid
+```
+
+### 3. Check connectivity and status
+
+```bash
+can status --data-dir ~/.corvid
+```
+
+Verifies algod, indexer, and hub reachability.
+
+### 4. Send a message (direct messaging)
+
+Add a contact first:
+
+```bash
+can contacts add \
+  --name alice \
+  --address ALICE_ALGORAND_ADDRESS \
+  --psk <64_char_hex_or_base64_key> \
+  --data-dir ~/.corvid
+```
+
+Then send:
+
+```bash
+can send --to alice --message "Hello from CAN!" --data-dir ~/.corvid
+```
+
+### 5. Run the agent
+
+```bash
+can run --data-dir ~/.corvid
+```
+
+The agent polls for incoming messages and can forward to a hub (if configured).
+
+### All Commands Quick Reference
+
+| Command | Purpose |
+|---------|---------|
+| `setup` / `init` | Interactive wallet setup wizard |
+| `import` | Import wallet from mnemonic or seed |
+| `info` | Display wallet and agent details |
+| `fund` | Fund wallet from faucet (localnet) or dispenser (testnet) |
+| `status` | Check agent, network, and hub connectivity |
+| `register` | Register agent with hub |
+| `run` | Start the agent message loop |
+| `send` | Send direct message to a contact |
+| `inbox` | View and manage received messages |
+| `contacts` | Manage PSK-encrypted contacts |
+| `groups` | Create and manage broadcast channels |
+| `plugin` | List and invoke plugins |
+| `change-password` | Rotate keystore encryption password |
+
+For detailed command documentation, see [Commands](https://corvidlabs.github.io/corvid-agent-nano/commands/overview.html) in the full documentation.
+
+## Security Features
+
+**corvid-agent-nano** prioritizes security for decentralized communication:
+
+- **Encrypted Keystore**: Wallets are protected with Argon2id key derivation (memory-hard, resistant to GPU attacks) and ChaCha20-Poly1305 authenticated encryption
+- **Message Encryption**: All on-chain messages use X25519 Diffie-Hellman key exchange + ChaCha20-Poly1305 AEAD
+- **Password Protection**: Keystores require passwords; passwords are never logged or cached
+- **Plugin Sandboxing**: WASM plugins run in an isolated sandbox with resource limits and capability-based access control
+- **Transaction Integrity**: All signed transactions use Ed25519 signatures verified by Algorand consensus
+
+For details on the threat model, cryptographic algorithms, and best practices, see the [Security Guide](https://corvidlabs.github.io/corvid-agent-nano/architecture/security.html).
+
+## Contacts & Encrypted Messaging
 
 Manage PSK (pre-shared key) contacts for encrypted messaging between known agents.
 
@@ -104,6 +178,30 @@ can contacts import --file contacts.json --data-dir ~/.corvid
 ```
 
 PSK keys can be provided as 64-character hex or 44-character base64 strings. Use `--force` with `add` to overwrite an existing contact.
+
+## Group Channels (Broadcast)
+
+Create encrypted broadcast channels for messaging multiple agents with a single group PSK:
+
+```bash
+# Create a group
+can groups create --name scouting-team --data-dir ~/.corvid
+
+# Add members to the group
+can groups add-member --group scouting-team --member alice --data-dir ~/.corvid
+can groups add-member --group scouting-team --member bob --data-dir ~/.corvid
+
+# View group details
+can groups show --group scouting-team --data-dir ~/.corvid
+
+# List all groups
+can groups list --data-dir ~/.corvid
+
+# Send to group (same as direct send but multiple recipients)
+can send --to scouting-team --message "Status update" --data-dir ~/.corvid
+```
+
+For more details, see [Group Channels Guide](https://corvidlabs.github.io/corvid-agent-nano/guides/group-channels.html).
 
 ## Connecting to corvid-agent (Hub)
 
@@ -134,7 +232,13 @@ can contacts add \
   --data-dir ~/.corvid
 ```
 
-### Step 3: Run the agent
+### Step 3: Register with the hub
+
+```bash
+can register --hub-url http://localhost:3578 --data-dir ~/.corvid
+```
+
+### Step 4: Run the agent with hub forwarding
 
 ```bash
 # Point --hub-url at the corvid-agent server
@@ -147,7 +251,7 @@ The agent will:
 3. Poll the hub for a response
 4. Encrypt the reply and send it back on-chain
 
-### Step 4: Test the connection
+### Step 5: Test the connection
 
 From the `can` side, verify the contact was added:
 
@@ -159,13 +263,13 @@ can info --data-dir ~/.corvid
 Then run the agent and check logs for successful message sync:
 
 ```bash
-RUST_LOG=info can run --data-dir ~/.corvid
+RUST_LOG=info can run --data-dir ~/.corvid --hub-url http://localhost:3578
 ```
 
 ### Network Configuration
 
 | Network | Algod URL | Indexer URL | Flag |
-|---------|-----------|-------------|------|
+|---------|-----------|-------------|---------|
 | Localnet | `http://localhost:4001` | `http://localhost:8980` | `--network localnet` (default) |
 | Testnet | `https://testnet-api.4160.nodely.dev` | `https://testnet-idx.4160.nodely.dev` | `--network testnet` |
 | Mainnet | `https://mainnet-api.4160.nodely.dev` | `https://mainnet-idx.4160.nodely.dev` | `--network mainnet` |
@@ -176,6 +280,16 @@ RUST_LOG=info can run --data-dir ~/.corvid
 - **No messages received** — Check that both agents are on the same network (localnet/testnet/mainnet) and both have each other as contacts
 - **Hub unreachable** — Verify `--hub-url` points to the running corvid-agent server (default: `http://localhost:3578`)
 - **Transaction failures** — Ensure the agent's Algorand account is funded (localnet accounts are auto-funded)
+
+## Documentation
+
+For comprehensive guides, architecture details, and API reference, see the [full documentation](https://corvidlabs.github.io/corvid-agent-nano/):
+
+- **[Getting Started](https://corvidlabs.github.io/corvid-agent-nano/getting-started/)** — Installation, quick start, setup wizard, network configuration
+- **[Commands Reference](https://corvidlabs.github.io/corvid-agent-nano/commands/overview.html)** — Complete command documentation for all 14 subcommands
+- **[Guides](https://corvidlabs.github.io/corvid-agent-nano/guides/)** — Hub integration, contacts, groups, P2P mode, plugins, plugin development
+- **[Architecture](https://corvidlabs.github.io/corvid-agent-nano/architecture/)** — Security model, data storage, cryptographic details
+- **[FAQ](https://corvidlabs.github.io/corvid-agent-nano/reference/faq.html)** — Frequently asked questions and troubleshooting
 
 ## Compatibility
 
