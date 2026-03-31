@@ -19,6 +19,7 @@ mod bridge;
 mod contacts;
 mod groups;
 mod keystore;
+mod mcp;
 mod sidecar;
 mod storage;
 mod transaction;
@@ -331,6 +332,44 @@ enum Command {
     Plugin {
         #[command(subcommand)]
         action: PluginAction,
+    },
+
+    /// Start an MCP (Model Context Protocol) stdio server exposing agent tools
+    ///
+    /// Compatible with Claude Code, Cursor, and other MCP clients.
+    /// Add to your MCP config: { "command": "can", "args": ["mcp", "--data-dir", "<path>"] }
+    Mcp {
+        /// Algorand network preset
+        #[arg(long, default_value = "localnet", env = "CAN_NETWORK")]
+        network: Network,
+
+        /// Override: Algorand node URL
+        #[arg(long, env = "CAN_ALGOD_URL")]
+        algod_url: Option<String>,
+
+        /// Override: Algorand node token
+        #[arg(long, env = "CAN_ALGOD_TOKEN")]
+        algod_token: Option<String>,
+
+        /// Override: Algorand indexer URL
+        #[arg(long, env = "CAN_INDEXER_URL")]
+        indexer_url: Option<String>,
+
+        /// Override: Algorand indexer token
+        #[arg(long, env = "CAN_INDEXER_TOKEN")]
+        indexer_token: Option<String>,
+
+        /// Agent seed (hex). If not provided, loads from keystore.
+        #[arg(long, env = "CAN_SEED")]
+        seed: Option<String>,
+
+        /// Agent Algorand address (used with --seed)
+        #[arg(long, env = "CAN_ADDRESS")]
+        address: Option<String>,
+
+        /// Keystore password (required for send_message when using keystore)
+        #[arg(long, env = "CAN_PASSWORD")]
+        password: Option<String>,
     },
 }
 
@@ -1835,5 +1874,29 @@ async fn main() -> Result<()> {
         }
 
         Command::Plugin { action } => cmd_plugin(action, data_dir).await,
+
+        Command::Mcp {
+            network,
+            algod_url,
+            algod_token,
+            indexer_url,
+            indexer_token,
+            seed,
+            address,
+            password,
+        } => {
+            let net = network.defaults();
+            let config = mcp::McpConfig {
+                data_dir: data_dir.to_string(),
+                algod_url: algod_url.unwrap_or(net.algod_url),
+                algod_token: algod_token.unwrap_or(net.algod_token),
+                indexer_url: indexer_url.unwrap_or(net.indexer_url),
+                indexer_token: indexer_token.unwrap_or(net.indexer_token),
+                seed_hex: seed,
+                address,
+                password,
+            };
+            mcp::run(config).await
+        }
     }
 }

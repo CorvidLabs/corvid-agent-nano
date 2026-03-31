@@ -143,8 +143,34 @@ fn is_blocked_host(host_with_port: &str) -> bool {
     if host_lower == "::1" {
         return true;
     }
-    if host_lower.starts_with("fd00:") {
+    // Full ULA range fc00::/7 (fc00::/8 and fd00::/8)
+    if host_lower.starts_with("fc00:") || host_lower.starts_with("fd00:") {
         return true;
+    }
+    // Link-local IPv6 fe80::/10
+    if host_lower.starts_with("fe80:") {
+        return true;
+    }
+    // IPv4-mapped IPv6 (::ffff:127.0.0.1, ::ffff:192.168.x.x, etc.)
+    // These bypass IPv4 checks: http://[::ffff:127.0.0.1]/ reaches localhost.
+    if let Some(mapped) = host_lower.strip_prefix("::ffff:") {
+        let parts: Vec<u8> =
+            mapped.split('.').filter_map(|p| p.parse::<u8>().ok()).collect();
+        if parts.len() == 4 {
+            // Re-run the IPv4 blocked check on the mapped address
+            let (a, b) = (parts[0], parts[1]);
+            if a == 127
+                || a == 10
+                || (a == 172 && (16..=31).contains(&b))
+                || (a == 192 && b == 168)
+                || (a == 169 && b == 254)
+            {
+                return true;
+            }
+        } else {
+            // Hex-encoded form like ::ffff:7f00:1 (127.0.0.1) — block conservatively
+            return true;
+        }
     }
 
     false
@@ -249,6 +275,37 @@ mod tests {
     fn ssrf_blocks_ipv6_localhost() {
         assert!(is_ssrf_blocked("http://[::1]/"));
         assert!(is_ssrf_blocked("http://::1/"));
+    }
+
+    #[test]
+    fn ssrf_blocks_ipv6_mapped_ipv4() {
+        // ::ffff:127.0.0.1 maps to localhost
+        assert!(is_ssrf_blocked("http://[::ffff:127.0.0.1]/"));
+        assert!(is_ssrf_blocked("http://::ffff:127.0.0.1/"));
+        // ::ffff:192.168.1.1 maps to RFC1918
+        assert!(is_ssrf_blocked("http://[::ffff:192.168.1.1]/"));
+        assert!(is_ssrf_blocked("http://::ffff:192.168.1.1/"));
+        // ::ffff:10.0.0.1 maps to RFC1918
+        assert!(is_ssrf_blocked("http://[::ffff:10.0.0.1]/"));
+        // ::ffff:169.254.169.254 maps to cloud metadata endpoint
+        assert!(is_ssrf_blocked("http://[::ffff:169.254.169.254]/"));
+        // Hex-encoded form (conservatively blocked)
+        assert!(is_ssrf_blocked("http://[::ffff:7f00:1]/"));
+    }
+
+    #[test]
+    fn ssrf_blocks_ipv6_link_local() {
+        assert!(is_ssrf_blocked("http://[fe80::1]/"));
+        assert!(is_ssrf_blocked("http://fe80::1/"));
+    }
+
+    #[test]
+    fn ssrf_blocks_ula_full_range() {
+        // fd00::/8 (already covered previously)
+        assert!(is_ssrf_blocked("http://[fd00::1]/"));
+        // fc00::/8 (lower half of ULA — now also blocked)
+        assert!(is_ssrf_blocked("http://[fc00::1]/"));
+        assert!(is_ssrf_blocked("http://fc00::1/"));
     }
 
     #[test]
