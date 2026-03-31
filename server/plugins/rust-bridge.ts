@@ -51,6 +51,16 @@ interface JsonRpcResponse {
   id: number | null;
 }
 
+function isJsonRpcResponse(v: unknown): v is JsonRpcResponse {
+  if (typeof v !== "object" || v === null) return false;
+  const r = v as Record<string, unknown>;
+  // id must be a number or null
+  if (r.id !== null && typeof r.id !== "number") return false;
+  // error, if present, must be a string
+  if ("error" in r && typeof r.error !== "string") return false;
+  return true;
+}
+
 type ToolRegistry = {
   register(entry: {
     name: string;
@@ -68,6 +78,11 @@ const INVOKE_TIMEOUT: Record<string, number> = {
   verified: 5_000,
   untrusted: 1_000,
 };
+
+// ── Safety limits ──────────────────────────────────────────────────────
+
+/** Max accumulated unparsed bytes before we kill the connection (10 MB). */
+const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 
 // ── Bridge ─────────────────────────────────────────────────────────────
 
@@ -254,6 +269,14 @@ export class PluginBridge {
 
   private handleData(chunk: string): void {
     this.buffer += chunk;
+
+    // Guard against unbounded memory growth from a misbehaving / malicious host.
+    if (this.buffer.length > MAX_BUFFER_BYTES) {
+      console.error("[plugin-bridge] receive buffer exceeded limit — closing socket");
+      this.socket?.destroy();
+      return;
+    }
+
     let newlineIdx: number;
     while ((newlineIdx = this.buffer.indexOf("\n")) !== -1) {
       const line = this.buffer.slice(0, newlineIdx);
@@ -262,7 +285,10 @@ export class PluginBridge {
       if (!line.trim()) continue;
 
       try {
-        const resp: JsonRpcResponse = JSON.parse(line);
+        const parsed: unknown = JSON.parse(line);
+        if (!isJsonRpcResponse(parsed)) continue;
+
+        const resp = parsed;
         if (resp.id != null && this.pending.has(resp.id)) {
           const { resolve, reject } = this.pending.get(resp.id)!;
           this.pending.delete(resp.id);
