@@ -1,6 +1,6 @@
 ---
 module: plugin-bridge
-version: 1
+version: 2
 status: active
 files:
   - server/plugins/rust-bridge.ts
@@ -19,6 +19,15 @@ This is the **only TypeScript code** needed to integrate the entire Rust plugin 
 
 ## Public API
 
+### Exported Interfaces
+
+| Interface | File | Description |
+|-----------|------|-------------|
+| `PluginManifest` | `rust-bridge.ts` | Plugin metadata including id, version, author, description, capabilities, trust tier, and tools |
+| `ToolInfo` | `rust-bridge.ts` | Plugin tool definition with name, description, and JSON Schema input specification |
+| `HealthStatus` | `rust-bridge.ts` | Plugin host health status including connection state, per-plugin status, and uptime |
+| `PluginEvent` | `rust-bridge.ts` | Event dispatched to plugins with type, optional pluginId, and payload |
+
 ### Exported Classes
 
 | Class | File | Description |
@@ -36,56 +45,82 @@ This is the **only TypeScript code** needed to integrate the entire Rust plugin 
 | `invoke` | `(pluginId: string, tool: string, input: unknown)` | `Promise<string>` | Invoke a plugin tool via MessagePack data plane |
 | `dispatchEvent` | `(event: PluginEvent)` | `Promise<void>` | Forward an event to subscribing plugins |
 | `healthCheck` | `()` | `Promise<HealthStatus>` | Check plugin host health |
+| `refreshTools` | `()` | `Promise<void>` | Refresh tool registry from host — fetches manifests and registers all tools |
+| `connected` | (getter) | `boolean` | Whether the bridge is currently connected to the plugin host |
+
+### Exported Functions
+
+| Function | File | Parameters | Returns | Description |
+|----------|------|-----------|---------|-------------|
+| `registerPluginRoutes` | `plugins.ts` | `(router: Router, bridge: PluginBridge)` | `void` | Register `/api/plugins` REST endpoints with the server router |
 
 ### Auto-Registration
 
-When the plugin host emits `plugin.tools_registered`, the bridge auto-registers each tool into the corvid-agent tool registry:
+The bridge auto-registers plugin tools on connect by calling `refreshTools()`:
+
+1. Fetches all plugin manifests from the host
+2. Stores trust tier info for each plugin (used to determine invocation timeout)
+3. Fetches all tools and registers them into the corvid-agent tool registry
+4. Tool names are namespaced as `plugin:<pluginId>:<toolName>` to avoid collisions
 
 ```typescript
-socket.on('plugin.tools_registered', ({ pluginId, tools }) => {
-  for (const tool of tools) {
-    toolRegistry.register({
-      name: `plugin:${pluginId}:${tool.name}`,
-      description: tool.description,
-      inputSchema: tool.inputSchema,  // JSON Schema v7 passthrough
-      execute: (input) => bridge.invoke(pluginId, tool.name, input),
-    });
-  }
+// After successful socket connection:
+this.refreshTools().catch((err) =>
+  console.warn("[plugin-bridge] tool refresh failed:", err.message),
+);
+
+// Tool registration for each plugin tool:
+toolRegistry.register({
+  name: `plugin:${pluginId}:${toolName}`,
+  description: tool.description,
+  inputSchema: tool.input_schema,  // JSON Schema v7 passthrough
+  execute: (input) => bridge.invoke(pluginId, toolName, input),
 });
 ```
 
-Tool names are namespaced as `plugin:<pluginId>:<toolName>` to avoid collisions with built-in tools.
+### REST Endpoints
 
-### REST Endpoint
+| Route | Method | Parameters | Response | Status | Description |
+|-------|--------|-----------|----------|--------|-------------|
+| `/api/plugins` | GET | — | `{ plugins: PluginListItem[] }` | 200, 503, 502 | List all plugins with their tools |
+| `/api/plugins/:id/invoke/:tool` | POST | `id` (plugin id), `tool` (tool name), body (tool input) | `{ result: string }` | 200, 400, 503, 500 | Invoke a specific plugin tool |
 
-| Route | Method | Response | Description |
-|-------|--------|----------|-------------|
-| `/api/plugins` | GET | `PluginManifest[]` with tools | List all plugins and their tools |
-| `/api/plugins/:id/invoke/:tool` | POST | `{ result: string }` | Invoke a specific plugin tool |
+**Response status codes:**
+- `200` — Success
+- `400` — Missing plugin id or tool name
+- `500` — Tool invocation failed (with optional `{ error, retryable }` fields)
+- `503` — Plugin host not connected or plugin draining (retryable)
+- `502` — Plugin host error (bad gateway)
 
 ### TypeScript Types
 
 ```typescript
-interface PluginManifest {
+export interface PluginManifest {
   id: string;
   version: string;
   author: string;
   description: string;
-  capabilities: Capability[];
-  trustTier: 'trusted' | 'verified' | 'untrusted';
+  capabilities: string[];
+  trust_tier: "trusted" | "verified" | "untrusted";
   tools: ToolInfo[];
 }
 
-interface ToolInfo {
+export interface ToolInfo {
   name: string;
   description: string;
-  inputSchema: Record<string, unknown>;  // JSON Schema v7
+  input_schema: Record<string, unknown>;  // JSON Schema v7
 }
 
-interface HealthStatus {
+export interface HealthStatus {
   connected: boolean;
-  plugins: Record<string, 'active' | 'draining' | 'unloaded'>;
+  plugins: Record<string, "active" | "draining" | "unloaded">;
   uptimeMs: number;
+}
+
+export interface PluginEvent {
+  type: string;
+  pluginId?: string;
+  payload: unknown;
 }
 ```
 
@@ -93,38 +128,40 @@ interface HealthStatus {
 
 1. The bridge is the **only** TS code that talks to the plugin host — no other server module opens the socket
 2. Tool names are always namespaced: `plugin:<pluginId>:<toolName>`
-3. Auto-registration happens on `plugin.tools_registered` events — zero per-plugin TypeScript wiring required
-4. The bridge reconnects automatically if the socket drops (with exponential backoff, max 30s)
-5. MessagePack is used for tool invocation payloads (data plane); JSON for everything else (control plane)
+3. Auto-registration is triggered by calling `refreshTools()` on socket connect — zero per-plugin TypeScript wiring required
+4. The bridge reconnects automatically if the socket drops (with exponential backoff, max 30s configured via constructor option)
+5. MessagePack is used for tool invocation payloads (data plane); newline-delimited JSON for JSON-RPC (control plane)
 6. The bridge does not validate plugin manifests — that's the host's responsibility
-7. If the plugin host is not running, the bridge logs a warning and queues no requests — tools simply aren't registered
-8. Tool `inputSchema` from plugins is passed through verbatim to the registry — no transformation
+7. If the plugin host is not running, the bridge logs a warning and queues no requests — tools simply aren't registered, endpoints return 503
+8. Tool `input_schema` from plugins is passed through verbatim to the registry — no transformation
+9. Invocation timeout depends on plugin trust tier: trusted=30s, verified=5s, untrusted=1s
+10. All pending RPC requests are rejected if socket closes or disconnect is called
 
 ## Behavioral Examples
 
-### Scenario: Plugin host starts with 3 plugins
+### Scenario: Bridge connects to plugin host with 3 plugins loaded
 
-- **Given** the plugin host starts and loads algo-oracle, code-snoop, memory-graph
-- **When** each plugin loads, the host emits `plugin.tools_registered` for each
-- **Then** the bridge registers all tools: `plugin:corvid-algo-oracle:set_threshold`, `plugin:corvid-algo-oracle:fetch_app_state`, `plugin:corvid-code-snoop:lint_diff`, `plugin:corvid-memory-graph:find_related_memories`
+- **Given** the plugin host is running with algo-oracle, code-snoop, memory-graph already loaded
+- **When** the bridge successfully connects to the Unix socket
+- **Then** `refreshTools()` fetches all manifests, stores trust tiers, and registers all tools: `plugin:corvid-algo-oracle:set_threshold`, `plugin:corvid-algo-oracle:fetch_app_state`, `plugin:corvid-code-snoop:lint_diff`, `plugin:corvid-memory-graph:find_related_memories`
 
 ### Scenario: Agent invokes a plugin tool
 
-- **Given** an agent calls tool `plugin:corvid-algo-oracle:set_threshold`
-- **When** the bridge receives the invocation
-- **Then** it sends a MessagePack-encoded `plugin.invoke` to the host, awaits the result, returns it to the agent
+- **Given** a tool `plugin:corvid-algo-oracle:set_threshold` with trust_tier="verified" is registered
+- **When** `invoke("corvid-algo-oracle", "set_threshold", input)` is called
+- **Then** the bridge: (1) looks up timeout for "verified" tier (5s), (2) encodes input as MessagePack, (3) sends `plugin.invoke` RPC with base64-encoded payload, (4) awaits result with 5s timeout, (5) returns result as string or throws error
 
-### Scenario: Plugin hot-reloaded
+### Scenario: Tool refresh is called manually
 
-- **Given** algo-oracle is reloaded with a new version that adds a new tool
-- **When** the host emits `plugin.tools_registered` with the updated tool list
-- **Then** the bridge unregisters old tools for that plugin and registers the new set
+- **Given** a user calls `refreshTools()` on the bridge
+- **When** the method completes
+- **Then** all previously registered tools are unregistered, fresh manifests fetched, and new tool set registered
 
 ### Scenario: Plugin host not running
 
 - **Given** the corvid-agent server starts but the plugin host sidecar is not running
-- **When** the bridge tries to connect
-- **Then** logs a warning, no plugin tools are registered, server operates normally without plugins
+- **When** the bridge tries to connect with `connect(socketPath)`
+- **Then** logs a warning, connection rejected, and `scheduleReconnect()` initiates exponential backoff; server operates normally without plugins, endpoints return 503
 
 ## Error Cases
 
@@ -142,27 +179,45 @@ interface HealthStatus {
 
 | Module | What is used |
 |--------|-------------|
-| `@msgpack/msgpack` | MessagePack encode/decode for data plane |
-| `corvid-plugin-host` | Unix socket server (Rust side) |
-| `server/tools/registry.ts` | Tool registration for auto-discovery |
+| `node:net` | `connect()` for Unix domain socket connection |
+| `@msgpack/msgpack` | `encode()` and `decode()` for data plane MessagePack serialization |
+| `corvid-plugin-host` | Unix socket server providing JSON-RPC interface (Rust sidecar) |
+| `ToolRegistry` (injected) | `register()` and `unregister()` for tool lifecycle management |
 
 ### Consumed By
 
 | Module | What is used |
 |--------|-------------|
-| `server/routes/plugins.ts` | `PluginBridge` for REST endpoints |
-| `server/tools/registry.ts` | Auto-registered plugin tools |
-| Agent tool invocation pipeline | Plugin tools callable like any built-in tool |
+| `server/routes/plugins.ts` | `PluginBridge` class and all exported interfaces (`PluginManifest`, `ToolInfo`, `HealthStatus`, `PluginEvent`); `registerPluginRoutes()` function |
+| Server initialization | Bridge instance passed to route registration and server lifecycle handlers |
+| Agent tool invocation pipeline | Auto-registered plugin tools callable like any built-in tool |
+| REST API clients (dashboard, CLI) | `/api/plugins` endpoints for plugin discovery and tool invocation |
 
 ## Configuration
 
-| Env Var / Flag | Default | Description |
-|----------------|---------|-------------|
-| `PLUGIN_SOCKET_PATH` | `~/.corvid/plugins.sock` | Path to plugin host Unix socket |
-| `PLUGIN_RECONNECT_MAX` | `30000` | Max reconnect backoff in milliseconds |
+### Constructor Options
+
+```typescript
+interface PluginBridgeOptions {
+  reconnectMax?: number;    // Max reconnect backoff in milliseconds (default: 30000)
+  toolRegistry?: ToolRegistry;  // Tool registry for auto-registration (default: null/no auto-register)
+}
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `reconnectMax` | `30000` | Max exponential backoff for reconnection attempts (milliseconds) |
+| `toolRegistry` | `null` | Optional tool registry instance; if provided, tools are auto-registered on connect |
+
+### Runtime Settings
+
+- **Socket path** — Passed as parameter to `connect(socketPath: string)`
+- **General RPC timeout** — 10s (hardcoded for control plane RPCs)
+- **Invocation timeouts** — Determined by plugin trust tier: trusted=30s, verified=5s, untrusted=1s
 
 ## Change Log
 
 | Date | Author | Change |
 |------|--------|--------|
+| 2026-03-31 | Magpie | Updated spec to match actual implementation: added all exported interfaces/functions, clarified `refreshTools()` auto-registration, fixed Configuration to use constructor options, updated field names to snake_case, expanded REST endpoint documentation |
 | 2026-03-28 | CorvidAgent | Initial spec from council synthesis (Issue #15) |
