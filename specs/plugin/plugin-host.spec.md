@@ -39,8 +39,8 @@ The Rust sidecar binary that hosts WASM plugins for corvid-agent. Runs as a sepa
 
 | Plane | Format | Use |
 |-------|--------|-----|
-| Control plane | JSON | Manifest queries, plugin management, health checks |
-| Data plane | MessagePack | Tool invocations, event dispatch, results |
+| Control plane | JSON-RPC | All requests: manifest queries, plugin management, health checks, tool invocations |
+| Payload encoding | MessagePack → base64 | Tool input structures are MessagePack-encoded, then base64-encoded for JSON-RPC transmission |
 
 ### JSON-RPC Methods (Control Plane)
 
@@ -50,8 +50,8 @@ The Rust sidecar binary that hosts WASM plugins for corvid-agent. Runs as a sepa
 | `plugin.load` | `{ path: string, tier: string }` | `{ ok: bool, error?: string }` | **Implemented** | Load a WASM plugin from path |
 | `plugin.unload` | `{ id: string }` | `{ ok: bool }` | **Implemented** | Gracefully unload a plugin (drain + shutdown) |
 | `plugin.reload` | `{ id: string, path: string }` | `{ ok: bool, error?: string }` | **Implemented** | Hot-reload: drain → swap → activate |
-| `plugin.tools` | `{ id?: string }` | `ToolInfo[]` | **Stub** (returns `[]`) | List tools — requires WASM tool schema extraction |
-| `plugin.invoke` | `{ plugin_id: string, tool: string, input: Value }` | `{ result: Value } \| { error: string }` | **Implemented** | Invoke a plugin tool via `__corvid_invoke` WASM export |
+| `plugin.tools` | `{ id?: string }` | `{ tools: Array<{ plugin_id: string; tool: ToolInfo }> }` | **Implemented** | List all plugin tools, optionally filtered by plugin ID |
+| `plugin.invoke` | `{ pluginId: string, tool: string, input: string }` (input is base64-encoded MessagePack) | `{ result?: string, error?: string, unavailable?: bool }` | **Implemented** | Invoke a plugin tool via `__corvid_invoke` WASM export |
 | `plugin.event` | `{ event: PluginEvent }` | `{ ok: bool, dispatched: u32, errors: string[] }` | **Implemented** | Dispatch event to subscribing plugins via `__corvid_on_event` |
 | `health.check` | `{}` | `{ plugins: StatusMap, uptime_ms: u64 }` | **Implemented** | Health status |
 
