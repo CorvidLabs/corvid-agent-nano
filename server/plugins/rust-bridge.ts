@@ -51,6 +51,21 @@ interface JsonRpcResponse {
   id: number | null;
 }
 
+function isJsonRpcResponse(v: unknown): v is JsonRpcResponse {
+  if (typeof v !== "object" || v === null) return false;
+  const r = v as Record<string, unknown>;
+  // id must be a number or null (not a string, object, etc.)
+  if (r.id !== null && typeof r.id !== "number") return false;
+  // error, if present, must be a string
+  if ("error" in r && typeof r.error !== "string") return false;
+  return true;
+}
+
+// ── Safety limits ──────────────────────────────────────────────────────
+
+/** Maximum accumulated unparsed bytes before we kill the connection (64 MiB). */
+const MAX_BUFFER_BYTES = 64 * 1024 * 1024;
+
 type ToolRegistry = {
   register(entry: {
     name: string;
@@ -254,6 +269,16 @@ export class PluginBridge {
 
   private handleData(chunk: string): void {
     this.buffer += chunk;
+
+    // Guard against memory exhaustion from a misbehaving or compromised plugin host.
+    if (this.buffer.length > MAX_BUFFER_BYTES) {
+      console.error(
+        `[plugin-bridge] receive buffer exceeded ${MAX_BUFFER_BYTES} bytes — closing connection`,
+      );
+      this.socket?.destroy();
+      return;
+    }
+
     let newlineIdx: number;
     while ((newlineIdx = this.buffer.indexOf("\n")) !== -1) {
       const line = this.buffer.slice(0, newlineIdx);
@@ -262,7 +287,10 @@ export class PluginBridge {
       if (!line.trim()) continue;
 
       try {
-        const resp: JsonRpcResponse = JSON.parse(line);
+        const parsed: unknown = JSON.parse(line);
+        if (!isJsonRpcResponse(parsed)) continue;
+
+        const resp = parsed;
         if (resp.id != null && this.pending.has(resp.id)) {
           const { resolve, reject } = this.pending.get(resp.id)!;
           this.pending.delete(resp.id);

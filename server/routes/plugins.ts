@@ -5,6 +5,11 @@
  * and delegates all work to the bridge.
  */
 
+// Valid plugin IDs: lowercase letters, digits, hyphens (e.g. "corvid-algo-oracle")
+const PLUGIN_ID_RE = /^[a-z][a-z0-9-]{0,63}$/;
+// Valid tool names: lowercase letters, digits, underscores, hyphens (e.g. "set_threshold")
+const TOOL_NAME_RE = /^[a-z][a-z0-9_-]{0,63}$/;
+
 import type { PluginBridge, PluginManifest, ToolInfo } from "../plugins/rust-bridge";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -28,6 +33,14 @@ interface PluginListItem extends PluginManifest {
 // ── Route registration ─────────────────────────────────────────────────
 
 export function registerPluginRoutes(router: Router, bridge: PluginBridge): void {
+  /**
+   * GET /api/plugins/health — plugin host health status.
+   */
+  router.get("/api/plugins/health", async () => {
+    const health = await bridge.healthCheck();
+    return Response.json(health, { status: health.connected ? 200 : 503 });
+  });
+
   /**
    * GET /api/plugins — list all plugins with their tools.
    */
@@ -78,12 +91,21 @@ export function registerPluginRoutes(router: Router, bridge: PluginBridge): void
         { status: 400 },
       );
     }
+    if (!PLUGIN_ID_RE.test(id)) {
+      return Response.json({ error: "invalid plugin id" }, { status: 400 });
+    }
+    if (!TOOL_NAME_RE.test(tool)) {
+      return Response.json({ error: "invalid tool name" }, { status: 400 });
+    }
 
     let input: unknown;
     try {
       input = await ctx.json();
-    } catch {
-      input = {};
+    } catch (e) {
+      return Response.json(
+        { error: `invalid request body: ${(e as Error).message}` },
+        { status: 400 },
+      );
     }
 
     try {
