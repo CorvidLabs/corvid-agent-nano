@@ -7,7 +7,7 @@
  */
 
 import { connect, type Socket } from "node:net";
-import { encode, decode } from "@msgpack/msgpack";
+import { encode } from "@msgpack/msgpack";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -143,12 +143,13 @@ export class PluginBridge {
       timeout,
     );
 
-    const data = resp as { result?: string; error?: string; unavailable?: boolean };
+    const data = resp as { result?: string; error?: unknown; unavailable?: boolean };
     if (data.unavailable) {
       throw Object.assign(new Error(`plugin ${pluginId} is draining`), { status: 503, retryable: true });
     }
-    if (data.error) {
-      throw new Error(data.error);
+    if (data.error != null) {
+      const msg = typeof data.error === "string" ? data.error : `plugin error (${pluginId}:${tool})`;
+      throw new Error(msg);
     }
     return data.result ?? "";
   }
@@ -252,8 +253,19 @@ export class PluginBridge {
     });
   }
 
+  // Maximum receive buffer size (1 MiB). Protects against a malicious or
+  // buggy plugin host that sends a huge message without a newline delimiter.
+  private static readonly MAX_BUFFER_BYTES = 1_048_576;
+
   private handleData(chunk: string): void {
     this.buffer += chunk;
+
+    if (this.buffer.length > PluginBridge.MAX_BUFFER_BYTES) {
+      console.error("[plugin-bridge] receive buffer exceeded limit — dropping connection");
+      this.socket?.destroy();
+      return;
+    }
+
     let newlineIdx: number;
     while ((newlineIdx = this.buffer.indexOf("\n")) !== -1) {
       const line = this.buffer.slice(0, newlineIdx);

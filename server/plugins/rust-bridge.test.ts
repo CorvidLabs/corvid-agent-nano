@@ -230,6 +230,36 @@ describe("PluginBridge", () => {
     }
   });
 
+  test("invoke surfaces string error from host", async () => {
+    host.handlers["plugin.invoke"] = () => ({ error: "threshold out of range" });
+
+    await bridge.connect(host.socketPath);
+    await expect(bridge.invoke("corvid-algo-oracle", "set_threshold", {}))
+      .rejects.toThrow("threshold out of range");
+  });
+
+  test("invoke with non-string error falls back to generic message", async () => {
+    host.handlers["plugin.invoke"] = () => ({ error: { code: 42 } });
+
+    await bridge.connect(host.socketPath);
+    await expect(bridge.invoke("corvid-algo-oracle", "set_threshold", {}))
+      .rejects.toThrow("plugin error (corvid-algo-oracle:set_threshold)");
+  });
+
+  test("oversized receive terminates socket", async () => {
+    await bridge.connect(host.socketPath);
+
+    // Send >1 MiB without a newline to trigger the buffer limit
+    const oversized = "x".repeat(1_100_000);
+    for (const client of host.clients) {
+      client.write(oversized);
+    }
+
+    // Give the bridge a moment to process and close
+    await new Promise((r) => setTimeout(r, 100));
+    expect(bridge.connected).toBe(false);
+  });
+
   test("disconnect rejects pending requests", async () => {
     // Set up a handler that never responds
     host.handlers["plugin.list"] = () => {
