@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+
+- **MCP server mode** (`can mcp` command) — Start corvid-agent-nano as a JSON-RPC 2.0 MCP server for Claude Code, Cursor, and other MCP-compatible clients
+  - Exposes 5 tools: `agent_info`, `list_contacts`, `get_inbox`, `check_balance`, `send_message`
+  - Support for `--network`, `--password`, and `--seed` options
+  - Comprehensive MCP integration guide with Claude Code and Cursor setup instructions
+- **MCP documentation** — New guide for MCP client configuration and IDE integration
+
+### Security
+
+- **SSRF bypass fixes** (critical) — Blocked IPv6-mapped IPv4 addresses (`::ffff:*`), IPv6 link-local (`fe80::/10`), and ULA lower range (`fc00::/8`)
+- **Wall-clock timeout enforcement** — Plugin host now enforces actual time limits, not just fuel/instruction limits
+- **Socket buffer bounds** — Capped incoming message buffer at 64 MiB to prevent heap exhaustion
+- **Input validation hardening** — Route parameter validation (`PLUGIN_ID_RE`, `TOOL_NAME_RE`) and JSON parse error reporting
+
+### Changed
+
+- **Commands section expanded** — Added 15th command: `mcp` (was 14 previously)
+- **Guides section expanded** — Added MCP integration guide (was 6 guides previously)
+
 ## [0.1.0] - 2026-03-29
 
 ### Added
