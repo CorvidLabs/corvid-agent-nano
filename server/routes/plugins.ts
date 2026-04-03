@@ -79,6 +79,18 @@ export function registerPluginRoutes(router: Router, bridge: PluginBridge): void
       );
     }
 
+    // Validate parameter formats to reject obviously malformed requests before
+    // they reach the bridge. Plugin IDs follow the spec-mandated pattern;
+    // tool names use the snake_case convention observed across all plugins.
+    const PLUGIN_ID_RE = /^[a-z][a-z0-9-]{0,49}$/;
+    const TOOL_NAME_RE = /^[a-z][a-z0-9_-]{0,63}$/;
+    if (!PLUGIN_ID_RE.test(id) || !TOOL_NAME_RE.test(tool)) {
+      return Response.json(
+        { error: "invalid plugin id or tool name format" },
+        { status: 400 },
+      );
+    }
+
     let input: unknown;
     try {
       input = await ctx.json();
