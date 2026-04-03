@@ -26,10 +26,11 @@ The `can` CLI binary provides the following commands:
 | [`contacts`](./contacts.md) | Manage PSK contacts (add, remove, list, export, import) |
 | [`groups`](./groups.md) | Manage group channels (create, members, export, import) |
 
-## Infrastructure
+## Infrastructure & Integration
 
 | Command | Description |
 |---------|-------------|
+| [`mcp`](./mcp.md) | Start JSON-RPC 2.0 MCP server for Claude Code and Cursor |
 | [`fund`](./fund.md) | Fund wallet from localnet faucet or show instructions |
 | [`register`](./register.md) | Register agent with the hub |
 | [`status`](./status.md) | Health check (algod, indexer, hub, balance, plugins) |
