@@ -9,10 +9,8 @@
     "forceConsistentCasingInFileNames": true,
     "noEmit": true,
     "resolveJsonModule": true,
-    "isolatedModules": true,
-    "types": ["bun-types"],
-    "typeRoots": ["./server/node_modules"]
+    "isolatedModules": true
   },
   "include": ["server/**/*.ts"],
-  "exclude": ["server/node_modules"]
+  "exclude": ["server/node_modules", "server/**/*.test.ts"]
 }
