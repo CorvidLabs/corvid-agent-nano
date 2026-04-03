@@ -19,6 +19,7 @@
 - [inbox](./commands/inbox.md)
 - [contacts](./commands/contacts.md)
 - [groups](./commands/groups.md)
+- [mcp](./commands/mcp.md)
 - [fund](./commands/fund.md)
 - [register](./commands/register.md)
 - [status](./commands/status.md)
@@ -34,6 +35,7 @@
 - [P2P Mode](./guides/p2p-mode.md)
 - [Plugins (WASM)](./guides/plugins.md)
 - [Plugin Development](./guides/plugin-development.md)
+- [MCP Integration](./guides/mcp-integration.md)
 
 # Architecture
 
