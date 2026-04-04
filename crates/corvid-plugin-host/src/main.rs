@@ -294,15 +294,16 @@ async fn handle_invoke(
     let plugin_id_owned = plugin_id.to_string();
     let tool_owned = tool.to_string();
 
-    let result = tokio::task::spawn_blocking(move || {
+    // Extract timeout before the move closure consumes `limits`.
+    let timeout_duration = limits.timeout;
+
+    let blocking_fut = tokio::task::spawn_blocking(move || {
         let ctx = InvokeContext {
             storage: invoke_ctx_storage,
             algo: invoke_ctx_algo,
             messaging: invoke_ctx_messaging,
         };
 
-        // Apply wall-clock timeout
-        let _timeout = limits.timeout;
         let handle = std::thread::spawn(move || {
             corvid_plugin_host::invoke::invoke_tool(
                 &engine,
@@ -320,11 +321,20 @@ async fn handle_invoke(
             Ok(result) => result,
             Err(_) => Err(anyhow::anyhow!("plugin panicked during invocation")),
         }
-        // Note: wall-clock timeout is enforced by Wasmtime fuel + the store's
-        // fuel limit. For additional safety, the caller can wrap in tokio::time::timeout.
-    })
-    .await
-    .map_err(|e| format!("spawn_blocking failed: {e}"))?;
+    });
+
+    // Enforce wall-clock timeout. The Wasmtime fuel budget handles
+    // instruction-count limits; this guards against blocking I/O or
+    // pathological host-function loops that escape fuel accounting.
+    let result = tokio::time::timeout(timeout_duration, blocking_fut)
+        .await
+        .map_err(|_| {
+            format!(
+                "plugin '{}' timed out after {:?}",
+                plugin_id, timeout_duration
+            )
+        })?
+        .map_err(|e| format!("spawn_blocking failed: {e}"))?;
 
     match result {
         Ok(value) => {

@@ -496,6 +496,7 @@ sdk-version = "^0.1"
                 event_filter: vec![],
                 trust_tier: TrustTier::Verified,
                 min_host_version: "0.1.0".into(),
+                tools: vec![],
             }),
             abi_version: Some(1),
             checks: vec![
