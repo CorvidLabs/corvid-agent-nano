@@ -139,11 +139,20 @@ fn is_blocked_host(host_with_port: &str) -> bool {
         } // 169.254.0.0/16
     }
 
-    // IPv6 blocked patterns
+    // IPv4-mapped IPv6 (::ffff:A.B.C.D) — re-check the IPv4 portion
+    if host_lower.starts_with("::ffff:") {
+        let ipv4_part = &host_lower["::ffff:".len()..];
+        return is_blocked_host(ipv4_part);
+    }
+
+    // IPv6 loopback
     if host_lower == "::1" {
         return true;
     }
-    if host_lower.starts_with("fd00:") {
+
+    // IPv6 unique-local (fc00::/7 covers addresses whose first octet is
+    // 0xfc or 0xfd, i.e. the first 16-bit group starts with "fc" or "fd").
+    if (host_lower.starts_with("fc") || host_lower.starts_with("fd")) && host_lower.contains(':') {
         return true;
     }
 
@@ -249,6 +258,25 @@ mod tests {
     fn ssrf_blocks_ipv6_localhost() {
         assert!(is_ssrf_blocked("http://[::1]/"));
         assert!(is_ssrf_blocked("http://::1/"));
+    }
+
+    #[test]
+    fn ssrf_blocks_ipv6_unique_local() {
+        // fc00::/7 — "fd" range
+        assert!(is_ssrf_blocked("http://[fd00::1]/"));
+        assert!(is_ssrf_blocked("http://[fd12:3456::1]/"));
+        // fc00::/7 — "fc" range
+        assert!(is_ssrf_blocked("http://[fc00::1]/"));
+    }
+
+    #[test]
+    fn ssrf_blocks_ipv4_mapped_ipv6() {
+        // ::ffff:127.0.0.1 — IPv4-mapped loopback
+        assert!(is_ssrf_blocked("http://[::ffff:127.0.0.1]/"));
+        // ::ffff:192.168.1.1 — IPv4-mapped RFC1918
+        assert!(is_ssrf_blocked("http://[::ffff:192.168.1.1]/"));
+        // ::ffff:169.254.169.254 — cloud metadata
+        assert!(is_ssrf_blocked("http://[::ffff:169.254.169.254]/"));
     }
 
     #[test]

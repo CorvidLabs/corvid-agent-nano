@@ -25,6 +25,14 @@ interface PluginListItem extends PluginManifest {
   tools: ToolInfo[];
 }
 
+// ── Security constants ─────────────────────────────────────────────────
+
+/** Plugin IDs must match the host's manifest ID regex. */
+const PLUGIN_ID_RE = /^[a-z][a-z0-9-]{0,49}$/;
+
+/** Tool names: lowercase letters, digits, hyphens, underscores. */
+const TOOL_NAME_RE = /^[a-z][a-z0-9_-]{0,63}$/;
+
 // ── Route registration ─────────────────────────────────────────────────
 
 export function registerPluginRoutes(router: Router, bridge: PluginBridge): void {
@@ -95,7 +103,10 @@ export function registerPluginRoutes(router: Router, bridge: PluginBridge): void
     try {
       input = await ctx.json();
     } catch {
-      input = {};
+      return Response.json(
+        { error: "invalid request body: expected JSON" },
+        { status: 400 },
+      );
     }
 
     try {

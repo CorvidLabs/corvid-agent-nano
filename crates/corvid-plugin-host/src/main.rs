@@ -115,6 +115,54 @@ async fn handle_request(state: &ServerState, req: JsonRpcRequest) -> JsonRpcResp
     }
 }
 
+/// Validate that `path` resolves to a `.wasm` file inside `{data_dir}/plugins/`.
+///
+/// This prevents path-traversal attacks where a caller could supply an
+/// arbitrary filesystem path via the JSON-RPC `plugin.load` / `plugin.reload`
+/// commands.  The function canonicalizes the path (resolving `..` and
+/// symlinks) and then asserts the result is a child of the plugins directory.
+fn validate_plugin_path(
+    path: &str,
+    data_dir: &std::path::Path,
+) -> Result<std::path::PathBuf, String> {
+    let input_path = std::path::Path::new(path);
+
+    // Reject empty paths
+    if path.is_empty() {
+        return Err("path must not be empty".into());
+    }
+
+    // Must have a .wasm extension (quick reject before any I/O)
+    if input_path.extension().map_or(true, |ext| ext != "wasm") {
+        return Err("plugin file must have a .wasm extension".into());
+    }
+
+    // Canonical form of the plugins directory
+    let plugins_dir = data_dir.join("plugins");
+    let canonical_plugins_dir = plugins_dir.canonicalize().map_err(|e| {
+        format!(
+            "plugins directory '{}' is not accessible: {e}",
+            plugins_dir.display()
+        )
+    })?;
+
+    // Canonicalize the requested path (resolves symlinks and `..` components)
+    let canonical_path = input_path.canonicalize().map_err(|e| {
+        format!("invalid path '{}': {e}", input_path.display())
+    })?;
+
+    // Ensure the resolved path is inside the plugins directory
+    if !canonical_path.starts_with(&canonical_plugins_dir) {
+        return Err(format!(
+            "path '{}' is outside the plugins directory '{}'",
+            input_path.display(),
+            canonical_plugins_dir.display()
+        ));
+    }
+
+    Ok(canonical_path)
+}
+
 async fn handle_load(
     state: &ServerState,
     params: &serde_json::Value,
@@ -135,10 +183,17 @@ async fn handle_load(
         _ => corvid_plugin_sdk::TrustTier::Untrusted,
     };
 
-    let wasm_bytes = std::fs::read(path).map_err(|e| format!("failed to read WASM: {e}"))?;
+    // Validate the path is within the plugins directory before reading
+    let canonical_path = validate_plugin_path(path, &state.data_dir)?;
+    let canonical_str = canonical_path.display().to_string();
 
-    // Read detached .sig file if it exists alongside the .wasm
-    let sig_path = format!("{path}.sig");
+    let wasm_bytes =
+        std::fs::read(&canonical_path).map_err(|e| format!("failed to read WASM: {e}"))?;
+
+    // Read detached .sig file if it exists alongside the .wasm.
+    // Construct the sig path from the validated canonical path so it is also
+    // guaranteed to be inside the plugins directory.
+    let sig_path = format!("{canonical_str}.sig");
     let sig_data = std::fs::read(&sig_path).ok();
     let trusted_keys_dir = state.data_dir.join("trusted-keys");
 
@@ -206,9 +261,14 @@ async fn handle_reload(
         _ => corvid_plugin_sdk::TrustTier::Untrusted,
     };
 
-    let wasm_bytes = std::fs::read(path).map_err(|e| format!("failed to read WASM: {e}"))?;
+    // Validate the path is within the plugins directory before reading
+    let canonical_path = validate_plugin_path(path, &state.data_dir)?;
+    let canonical_str = canonical_path.display().to_string();
 
-    let sig_path = format!("{path}.sig");
+    let wasm_bytes =
+        std::fs::read(&canonical_path).map_err(|e| format!("failed to read WASM: {e}"))?;
+
+    let sig_path = format!("{canonical_str}.sig");
     let sig_data = std::fs::read(&sig_path).ok();
     let trusted_keys_dir = state.data_dir.join("trusted-keys");
 
@@ -249,8 +309,20 @@ async fn handle_invoke(
     // Input can be raw JSON or base64-encoded msgpack (from PluginBridge).
     // The PluginBridge sends base64(msgpack({pluginId, tool, input})) — we
     // extract the nested `input` field.
+    //
+    // Reject excessively large inputs before decoding to prevent DoS via
+    // memory exhaustion.  10 MB of base64 decodes to ~7.5 MB of raw bytes,
+    // which is well above any reasonable tool input size.
+    const MAX_INPUT_B64_LEN: usize = 10 * 1024 * 1024; // 10 MB
+
     let input = match params.get("input").and_then(|v| v.as_str()) {
         Some(b64) => {
+            if b64.len() > MAX_INPUT_B64_LEN {
+                return Err(format!(
+                    "input too large ({} bytes, max {MAX_INPUT_B64_LEN})",
+                    b64.len()
+                ));
+            }
             use base64::Engine as _;
             match base64::engine::general_purpose::STANDARD.decode(b64) {
                 Ok(bytes) => {
