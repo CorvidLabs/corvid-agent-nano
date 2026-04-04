@@ -69,6 +69,20 @@ const INVOKE_TIMEOUT: Record<string, number> = {
   untrusted: 1_000,
 };
 
+// ── Security constants ─────────────────────────────────────────────────
+
+/** Plugin IDs must match the host's manifest ID regex. */
+const PLUGIN_ID_RE = /^[a-z][a-z0-9-]{0,49}$/;
+
+/** Tool names: lowercase letters, digits, hyphens, underscores. */
+const TOOL_NAME_RE = /^[a-z][a-z0-9_-]{0,63}$/;
+
+/**
+ * Maximum size of the incoming socket buffer before the connection is
+ * dropped.  Prevents memory exhaustion from a misbehaving / malicious host.
+ */
+const MAX_BUFFER_BYTES = 10 * 1024 * 1024; // 10 MB
+
 // ── Bridge ─────────────────────────────────────────────────────────────
 
 export class PluginBridge {
@@ -133,6 +147,13 @@ export class PluginBridge {
 
   /** Invoke a plugin tool. Uses MessagePack for the payload. */
   async invoke(pluginId: string, tool: string, input: unknown): Promise<string> {
+    if (!PLUGIN_ID_RE.test(pluginId)) {
+      throw new Error(`invalid plugin ID: ${pluginId}`);
+    }
+    if (!TOOL_NAME_RE.test(tool)) {
+      throw new Error(`invalid tool name: ${tool}`);
+    }
+
     const tier = this.pluginTiers.get(pluginId) ?? "untrusted";
     const timeout = INVOKE_TIMEOUT[tier] ?? INVOKE_TIMEOUT.untrusted;
 
@@ -254,6 +275,16 @@ export class PluginBridge {
 
   private handleData(chunk: string): void {
     this.buffer += chunk;
+
+    // Guard against memory exhaustion: drop the connection if the buffer
+    // grows beyond MAX_BUFFER_BYTES without a newline being found.
+    if (this.buffer.length > MAX_BUFFER_BYTES) {
+      console.error("[plugin-bridge] response buffer exceeded max size — dropping connection");
+      this.buffer = "";
+      this.socket?.destroy();
+      return;
+    }
+
     let newlineIdx: number;
     while ((newlineIdx = this.buffer.indexOf("\n")) !== -1) {
       const line = this.buffer.slice(0, newlineIdx);
