@@ -7,6 +7,9 @@ use corvid_plugin_sdk::PluginManifest;
 use crate::registry::PluginRegistry;
 
 /// Tool info returned to the TypeScript bridge for auto-registration.
+///
+/// Mirrors [`corvid_plugin_sdk::ToolInfo`] but kept local for the host
+/// wire format so discovery can evolve independently of the SDK.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolInfo {
     /// Tool name (unique within plugin).
@@ -45,12 +48,12 @@ pub async fn list_plugins(registry: &PluginRegistry) -> ListResponse {
 
 /// List tools for all plugins or filtered by plugin ID.
 ///
-/// Tool discovery is currently based on manifest data. Full WASM-based
-/// tool schema extraction will be added when per-plugin Store instances
-/// are fully integrated.
+/// Tool metadata is sourced from the `tools` field in each plugin's
+/// [`PluginManifest`]. Plugins declare their tools at manifest time so
+/// the host can enumerate them without instantiating the WASM module.
 pub async fn list_tools(registry: &PluginRegistry, plugin_id: Option<&str>) -> ToolsResponse {
     let manifests = registry.list_manifests().await;
-    let tools = Vec::new();
+    let mut tools = Vec::new();
 
     for manifest in manifests {
         if let Some(id) = plugin_id {
@@ -59,13 +62,16 @@ pub async fn list_tools(registry: &PluginRegistry, plugin_id: Option<&str>) -> T
             }
         }
 
-        // Tool schemas will be extracted from WASM instances in the full
-        // integration. For now, we report plugins are loaded but tools
-        // require the WASM instance to enumerate.
-        let _ = manifest;
-
-        // Placeholder: when full WASM integration is done, we'll call
-        // __corvid_tool_schemas on each plugin's instance to get ToolInfo.
+        for sdk_tool in &manifest.tools {
+            tools.push(PluginToolEntry {
+                plugin_id: manifest.id.clone(),
+                tool: ToolInfo {
+                    name: sdk_tool.name.clone(),
+                    description: sdk_tool.description.clone(),
+                    input_schema: sdk_tool.input_schema.clone(),
+                },
+            });
+        }
     }
 
     ToolsResponse { tools }

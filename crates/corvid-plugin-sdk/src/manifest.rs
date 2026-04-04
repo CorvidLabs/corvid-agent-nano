@@ -11,6 +11,23 @@ pub enum TrustTier {
     Untrusted,
 }
 
+/// Metadata for a single tool exposed by a plugin.
+///
+/// Declared in the manifest so the host can enumerate tools without
+/// calling into the WASM instance at list time.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolInfo {
+    /// Unique tool name within the plugin.
+    pub name: String,
+
+    /// Human-readable description shown in the tool registry.
+    pub description: String,
+
+    /// JSON Schema v7 describing the expected input object.
+    #[serde(default)]
+    pub input_schema: serde_json::Value,
+}
+
 /// Static metadata describing a plugin. Returned by [`CorvidPlugin::manifest()`].
 ///
 /// The `id` field must match `^[a-z][a-z0-9-]{0,49}$`.
@@ -40,4 +57,9 @@ pub struct PluginManifest {
 
     /// Minimum compatible host version (semver).
     pub min_host_version: String,
+
+    /// Tools this plugin exposes. Used for auto-registration in the
+    /// TypeScript tool registry without calling into the WASM instance.
+    #[serde(default)]
+    pub tools: Vec<ToolInfo>,
 }

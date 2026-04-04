@@ -7,7 +7,7 @@
 //!   - "hello": returns {"greeting": "Hello, <name>!"} for input {"name": "..."}
 //!   - "echo":  returns the input unchanged
 
-use corvid_plugin_sdk::manifest::{PluginManifest, TrustTier};
+use corvid_plugin_sdk::manifest::{PluginManifest, ToolInfo, TrustTier};
 use std::alloc::{alloc, Layout};
 
 // ── ABI version ─────────────────────────────────────────────────────
@@ -51,6 +51,25 @@ pub extern "C" fn __corvid_manifest() -> i32 {
         event_filter: vec![],
         trust_tier: TrustTier::Untrusted,
         min_host_version: "0.1.0".into(),
+        tools: vec![
+            ToolInfo {
+                name: "hello".into(),
+                description: "Returns a greeting for the given name".into(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "name": { "type": "string", "description": "Name to greet" }
+                    }
+                }),
+            },
+            ToolInfo {
+                name: "echo".into(),
+                description: "Returns the input unchanged".into(),
+                input_schema: serde_json::json!({
+                    "type": "object"
+                }),
+            },
+        ],
     };
 
     let bytes = rmp_serde::to_vec(&manifest).unwrap();

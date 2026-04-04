@@ -367,6 +367,7 @@ mod tests {
             event_filter: vec![EventKind::AgentMessage],
             trust_tier: TrustTier::Verified,
             min_host_version: "0.1.0".into(),
+            tools: vec![],
         };
         assert!(validate_manifest(&m).is_ok());
     }
@@ -382,6 +383,7 @@ mod tests {
             event_filter: vec![],
             trust_tier: TrustTier::Untrusted,
             min_host_version: "0.1.0".into(),
+            tools: vec![],
         };
         let err = validate_manifest(&m).unwrap_err();
         assert!(matches!(err, LoadError::ManifestInvalid(_)));
@@ -398,6 +400,7 @@ mod tests {
             event_filter: vec![],
             trust_tier: TrustTier::Untrusted,
             min_host_version: "0.1.0".into(),
+            tools: vec![],
         };
         let err = validate_manifest(&m).unwrap_err();
         assert!(matches!(err, LoadError::ManifestInvalid(_)));
@@ -414,6 +417,7 @@ mod tests {
             event_filter: vec![],
             trust_tier: TrustTier::Untrusted,
             min_host_version: "0.1.0".into(),
+            tools: vec![],
         };
         let err = validate_manifest(&m).unwrap_err();
         assert!(matches!(err, LoadError::ManifestInvalid(_)));
@@ -579,6 +583,7 @@ mod tests {
             event_filter: vec![],
             trust_tier: TrustTier::Untrusted,
             min_host_version: "0.1.0".into(),
+            tools: vec![],
         }
     }
 }

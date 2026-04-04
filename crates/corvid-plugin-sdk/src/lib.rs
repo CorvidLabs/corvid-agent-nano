@@ -16,7 +16,7 @@ pub mod tool;
 pub use capability::Capability;
 pub use context::{InitContext, ToolContext};
 pub use error::{EventKind, PluginError, PluginEvent};
-pub use manifest::{PluginManifest, TrustTier};
+pub use manifest::{PluginManifest, ToolInfo, TrustTier};
 pub use service::{
     AlgoReadService, DbReadService, FsReadService, HttpService, MessagingService, StorageService,
 };
@@ -123,11 +123,57 @@ mod tests {
             event_filter: vec![EventKind::AgentMessage],
             trust_tier: TrustTier::Verified,
             min_host_version: "0.1.0".into(),
+            tools: vec![],
         };
 
         let json = serde_json::to_string(&manifest).unwrap();
         assert!(json.contains("test-plugin"));
         assert!(json.contains("Verified"));
+    }
+
+    #[test]
+    fn manifest_tools_roundtrip() {
+        let manifest = PluginManifest {
+            id: "oracle-plugin".into(),
+            version: "1.0.0".into(),
+            author: "corvid".into(),
+            description: "Oracle with tools".into(),
+            capabilities: vec![],
+            event_filter: vec![],
+            trust_tier: TrustTier::Untrusted,
+            min_host_version: "0.1.0".into(),
+            tools: vec![ToolInfo {
+                name: "get_price".into(),
+                description: "Get current asset price".into(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "asset": { "type": "string" }
+                    },
+                    "required": ["asset"]
+                }),
+            }],
+        };
+
+        // Verify msgpack roundtrip (same path as WASM manifest extraction)
+        let packed = rmp_serde::to_vec(&manifest).unwrap();
+        let unpacked: PluginManifest = rmp_serde::from_slice(&packed).unwrap();
+        assert_eq!(unpacked.tools.len(), 1);
+        assert_eq!(unpacked.tools[0].name, "get_price");
+
+        // Manifest without tools deserializes without error (backward compat)
+        let json_no_tools = serde_json::json!({
+            "id": "old-plugin",
+            "version": "1.0.0",
+            "author": "corvid",
+            "description": "Old plugin without tools field",
+            "capabilities": [],
+            "event_filter": [],
+            "trust_tier": "Untrusted",
+            "min_host_version": "0.1.0"
+        });
+        let old: PluginManifest = serde_json::from_value(json_no_tools).unwrap();
+        assert_eq!(old.tools.len(), 0);
     }
 
     #[test]
