@@ -1,9 +1,18 @@
 /**
  * Plugin Bridge — TypeScript client for the Rust plugin host sidecar.
  *
- * Communicates over Unix domain socket using newline-delimited JSON-RPC.
- * Auto-registers plugin tools into the agent tool registry on connect.
- * Reconnects with exponential backoff if the socket drops.
+ * Communicates over Unix domain socket using:
+ * - Control plane: JSON-RPC (newline-delimited)
+ * - Data plane: MessagePack (base64-encoded in JSON-RPC params for tool invocation)
+ *
+ * Features:
+ * - Auto-registers plugin tools into the agent tool registry on connect
+ * - Enforces per-trust-tier timeouts on tool invocation (trusted: 30s, verified: 5s, untrusted: 1s)
+ * - Reconnects with exponential backoff (500ms initial, configurable max ~30s) if the socket drops
+ * - Handles socket lifecycle events (connect, close, error)
+ *
+ * When a PluginBridge is constructed with a toolRegistry option, tools are automatically
+ * discovered and registered on connect() and when refreshTools() is called.
  */
 
 import { connect, type Socket } from "node:net";
@@ -85,19 +94,32 @@ export class PluginBridge {
   private registeredTools = new Set<string>();
   private pluginTiers = new Map<string, string>();
 
+  /**
+   * Initialize the plugin bridge.
+   * @param opts.reconnectMax Maximum reconnect backoff in milliseconds (default: 30_000)
+   * @param opts.toolRegistry Optional tool registry for auto-registration on connect/refresh
+   */
   constructor(opts?: { reconnectMax?: number; toolRegistry?: ToolRegistry }) {
     this.reconnectMax = opts?.reconnectMax ?? 30_000;
     this.toolRegistry = opts?.toolRegistry ?? null;
   }
 
-  /** Connect to the plugin host Unix socket. */
+  /**
+   * Connect to the plugin host Unix socket.
+   * Initiates auto-registration via refreshTools() if a tool registry was provided.
+   * @param socketPath Path to the Unix socket (e.g., ~/.corvid/plugins.sock)
+   * @throws Error if connection is refused; schedules automatic reconnect with exponential backoff
+   */
   async connect(socketPath: string): Promise<void> {
     this.socketPath = socketPath;
     this.closed = false;
     return this.doConnect();
   }
 
-  /** Gracefully close the socket connection. */
+  /**
+   * Gracefully close the socket connection.
+   * Clears all timers, rejects pending requests, unregisters tools, and prevents reconnection.
+   */
   async disconnect(): Promise<void> {
     this.closed = true;
     if (this.reconnectTimer) {
@@ -116,14 +138,21 @@ export class PluginBridge {
     this.pending.clear();
   }
 
-  /** List all loaded plugin manifests. */
+  /**
+   * RPC `plugin.list` — List all loaded plugin manifests.
+   * @returns Array of plugin manifests with metadata (id, version, author, description, capabilities, trust_tier, tools)
+   */
   async listManifests(): Promise<PluginManifest[]> {
     const resp = await this.rpc("plugin.list", {});
     const data = resp as { plugins?: PluginManifest[] };
     return data.plugins ?? [];
   }
 
-  /** List tools (all or filtered by plugin). */
+  /**
+   * RPC `plugin.tools` — List all tools, optionally filtered by plugin.
+   * @param pluginId Optional plugin ID to filter tools to that plugin only
+   * @returns Array of tools with name, description, and JSON Schema v7 input_schema
+   */
   async listTools(pluginId?: string): Promise<ToolInfo[]> {
     const params = pluginId ? { id: pluginId } : {};
     const resp = await this.rpc("plugin.tools", params);
@@ -131,7 +160,15 @@ export class PluginBridge {
     return (data.tools ?? []).map((t) => t.tool);
   }
 
-  /** Invoke a plugin tool. Uses MessagePack for the payload. */
+  /**
+   * RPC `plugin.invoke` — Invoke a plugin tool with MessagePack-encoded input.
+   * Respects trust tier timeouts: trusted (30s), verified (5s), untrusted (1s).
+   * @param pluginId Plugin ID
+   * @param tool Tool name
+   * @param input Input object (will be MessagePack-encoded and base64-serialized)
+   * @returns Tool result as a string
+   * @throws Error if plugin is unavailable (503, retryable), timeout, or plugin returns error
+   */
   async invoke(pluginId: string, tool: string, input: unknown): Promise<string> {
     const tier = this.pluginTiers.get(pluginId) ?? "untrusted";
     const timeout = INVOKE_TIMEOUT[tier] ?? INVOKE_TIMEOUT.untrusted;
@@ -153,12 +190,19 @@ export class PluginBridge {
     return data.result ?? "";
   }
 
-  /** Forward an event to subscribing plugins. */
+  /**
+   * RPC `plugin.dispatch` — Forward an event to plugins that subscribed to it.
+   * @param event Event with type, optional pluginId, and generic payload
+   */
   async dispatchEvent(event: PluginEvent): Promise<void> {
     await this.rpc("plugin.dispatch", event);
   }
 
-  /** Check plugin host health. */
+  /**
+   * RPC `health.check` — Check plugin host health status.
+   * Never throws; always returns a HealthStatus object.
+   * @returns Health status including connected flag, per-plugin state, and uptime in ms
+   */
   async healthCheck(): Promise<HealthStatus> {
     try {
       const resp = await this.rpc("health.check", {});
@@ -173,14 +217,27 @@ export class PluginBridge {
     }
   }
 
-  /** Whether the bridge is currently connected. */
+  /**
+   * Whether the bridge is currently connected to the plugin host socket.
+   * Check this before calling other methods to avoid "not connected" errors.
+   */
   get connected(): boolean {
     return this.socket !== null && !this.socket.destroyed;
   }
 
   // ── Auto-registration ──────────────────────────────────────────────
 
-  /** Refresh tool registry from host — called on connect and can be called manually. */
+  /**
+   * Refresh plugin tools and auto-register them into the tool registry.
+   * Fetches manifests to learn trust tiers, then fetches all tools and registers each.
+   * Tools are registered with namespaced names: `plugin:<pluginId>:<toolName>`.
+   * Unregisters stale tools from previous registrations before registering new ones.
+   *
+   * Called automatically on successful connect() if a tool registry was provided.
+   * Can also be called manually to handle plugin hot-reload without reconnecting.
+   *
+   * @throws Error if RPC calls fail (manifests or tools not available)
+   */
   async refreshTools(): Promise<void> {
     if (!this.toolRegistry) return;
 
@@ -209,6 +266,7 @@ export class PluginBridge {
     }
   }
 
+  /** Unregister all currently registered plugin tools from the registry. */
   private unregisterAllTools(): void {
     if (!this.toolRegistry) return;
     for (const name of this.registeredTools) {
