@@ -7,7 +7,7 @@
  */
 
 import { connect, type Socket } from "node:net";
-import { encode, decode } from "@msgpack/msgpack";
+import { encode } from "@msgpack/msgpack";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
