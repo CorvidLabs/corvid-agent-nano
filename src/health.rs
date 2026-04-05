@@ -41,7 +41,11 @@ impl HealthState {
 
     fn to_response(&self) -> HealthResponse {
         HealthResponse {
-            status: if self.algod_connected { "healthy" } else { "degraded" },
+            status: if self.algod_connected {
+                "healthy"
+            } else {
+                "degraded"
+            },
             network: self.network.clone(),
             uptime_secs: self.started_at.elapsed().as_secs(),
             last_message_at: self.last_message_at.map(|dt| dt.to_rfc3339()),
@@ -106,8 +110,7 @@ pub async fn run_health_server(port: u16, state: Arc<RwLock<HealthState>>) {
                 || request.starts_with("GET /\r")
             {
                 let health = state.read().await.to_response();
-                let body =
-                    serde_json::to_string(&health).unwrap_or_else(|_| "{}".to_string());
+                let body = serde_json::to_string(&health).unwrap_or_else(|_| "{}".to_string());
                 ("200 OK", body)
             } else {
                 ("404 Not Found", r#"{"error":"not found"}"#.to_string())

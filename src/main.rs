@@ -722,7 +722,11 @@ async fn cmd_run(
         data_dir,
     )?;
 
-    let effective_hub = if no_hub { "disabled (P2P mode)".to_string() } else { hub_url.clone() };
+    let effective_hub = if no_hub {
+        "disabled (P2P mode)".to_string()
+    } else {
+        hub_url.clone()
+    };
 
     info!(
         name = %name,
@@ -911,10 +915,7 @@ async fn cmd_run(
                                 plugins = plugin_count,
                                 "plugin host sidecar ready"
                             );
-                            println!(
-                                "  Plugins:  active ({} loaded)",
-                                plugin_count
-                            );
+                            println!("  Plugins:  active ({} loaded)", plugin_count);
                         }
                         Err(e) => {
                             warn!(error = %e, "plugin host socket ready but bridge connect failed");
@@ -1301,7 +1302,9 @@ async fn cmd_status(
                     let min_algo = info.min_balance as f64 / 1_000_000.0;
                     println!("  Balance: {:.6} ALGO (min: {:.6})", algo, min_algo);
                     if info.amount < 100_000 {
-                        println!("  WARNING: Balance is very low — may not be able to send messages");
+                        println!(
+                            "  WARNING: Balance is very low — may not be able to send messages"
+                        );
                     }
                 }
                 Err(e) => println!("  Balance: unknown ({})", e),
@@ -1326,8 +1329,7 @@ async fn cmd_status(
     let messages_db = data_path.join("messages.db");
     if messages_db.exists() {
         let conn = rusqlite::Connection::open(&messages_db)?;
-        let msg_count: i64 =
-            conn.query_row("SELECT COUNT(*) FROM messages", [], |r| r.get(0))?;
+        let msg_count: i64 = conn.query_row("SELECT COUNT(*) FROM messages", [], |r| r.get(0))?;
         let conv_count: i64 = conn.query_row(
             "SELECT COUNT(DISTINCT participant) FROM messages",
             [],
@@ -1504,7 +1506,12 @@ async fn cmd_send(
             }
         }
 
-        println!("\nGroup \"{}\" — sent to {}/{} members", group_name, sent, members.len());
+        println!(
+            "\nGroup \"{}\" — sent to {}/{} members",
+            group_name,
+            sent,
+            members.len()
+        );
         return Ok(());
     }
 
@@ -1587,12 +1594,11 @@ fn cmd_inbox(from: Option<String>, limit: usize, data_dir: &str) -> Result<()> {
     let (query, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
         if let Some(ref addr) = from_address {
             (
-                format!(
-                    "SELECT id, participant, sender, recipient, content, timestamp_secs, \
+                "SELECT id, participant, sender, recipient, content, timestamp_secs, \
                      confirmed_round, direction, reply_to_id, reply_to_preview \
                      FROM messages WHERE participant = ?1 \
                      ORDER BY timestamp_secs DESC LIMIT ?2"
-                ),
+                    .to_string(),
                 vec![
                     Box::new(addr.clone()) as Box<dyn rusqlite::types::ToSql>,
                     Box::new(limit as i64),
@@ -1600,12 +1606,11 @@ fn cmd_inbox(from: Option<String>, limit: usize, data_dir: &str) -> Result<()> {
             )
         } else {
             (
-                format!(
-                    "SELECT id, participant, sender, recipient, content, timestamp_secs, \
+                "SELECT id, participant, sender, recipient, content, timestamp_secs, \
                      confirmed_round, direction, reply_to_id, reply_to_preview \
                      FROM messages \
                      ORDER BY timestamp_secs DESC LIMIT ?1"
-                ),
+                    .to_string(),
                 vec![Box::new(limit as i64) as Box<dyn rusqlite::types::ToSql>],
             )
         };
@@ -1783,8 +1788,8 @@ async fn cmd_plugin(action: PluginAction, data_dir: &str) -> Result<()> {
 // ---------------------------------------------------------------------------
 
 fn init_tracing(log_format: LogFormat) {
-    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| "info".into());
+    let filter =
+        tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
     match log_format {
         LogFormat::Pretty => {
             tracing_subscriber::fmt().with_env_filter(filter).init();

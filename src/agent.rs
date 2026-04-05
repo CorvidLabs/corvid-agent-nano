@@ -133,24 +133,30 @@ pub async fn run_message_loop<A, I, S, M>(
                     let hub_url = config.hub_url.as_deref().unwrap();
 
                     // Step 1: Forward to hub
-                    let task_id =
-                        match forward_to_hub(&http, hub_url, &msg.sender, &msg.content)
+                    let task_id = match forward_to_hub(&http, hub_url, &msg.sender, &msg.content)
+                        .await
+                    {
+                        Some(id) => id,
+                        None => {
+                            // Hub unreachable — send error reply on-chain
+                            let error_msg =
+                                "[error] Agent hub is unreachable. Please try again later.";
+                            warn!(recipient = %msg.sender, "hub unreachable — sending error reply");
+                            if let Err(e) = send_reply(
+                                &client,
+                                &*algod,
+                                &config.agent_address,
+                                &msg.sender,
+                                error_msg,
+                                &config.signing_key,
+                            )
                             .await
-                        {
-                            Some(id) => id,
-                            None => {
-                                // Hub unreachable — send error reply on-chain
-                                let error_msg = "[error] Agent hub is unreachable. Please try again later.";
-                                warn!(recipient = %msg.sender, "hub unreachable — sending error reply");
-                                if let Err(e) = send_reply(
-                                    &client, &*algod, &config.agent_address,
-                                    &msg.sender, error_msg, &config.signing_key,
-                                ).await {
-                                    warn!(error = %e, "failed to send hub-unreachable error reply");
-                                }
-                                continue;
+                            {
+                                warn!(error = %e, "failed to send hub-unreachable error reply");
                             }
-                        };
+                            continue;
+                        }
+                    };
 
                     // Step 2: Poll for hub response
                     let response = match poll_hub_task(&http, hub_url, &task_id).await {
@@ -160,9 +166,15 @@ pub async fn run_message_loop<A, I, S, M>(
                             let error_msg = "[error] Agent did not produce a response. The request may have timed out.";
                             warn!(task_id = %task_id, recipient = %msg.sender, "hub task failed — sending error reply");
                             if let Err(e) = send_reply(
-                                &client, &*algod, &config.agent_address,
-                                &msg.sender, error_msg, &config.signing_key,
-                            ).await {
+                                &client,
+                                &*algod,
+                                &config.agent_address,
+                                &msg.sender,
+                                error_msg,
+                                &config.signing_key,
+                            )
+                            .await
+                            {
                                 warn!(error = %e, "failed to send hub-timeout error reply");
                             }
                             continue;
@@ -413,10 +425,7 @@ mod tests {
     fn default_config() {
         let config = AgentLoopConfig::default();
         assert_eq!(config.poll_interval_secs, 5);
-        assert_eq!(
-            config.hub_url.as_deref(),
-            Some("http://localhost:3578")
-        );
+        assert_eq!(config.hub_url.as_deref(), Some("http://localhost:3578"));
         assert_eq!(config.agent_name, "can");
     }
 

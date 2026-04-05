@@ -51,11 +51,8 @@ pub fn run_wizard(config: WizardConfig) -> Result<WizardResult> {
     let network = select_network(config.network)?;
 
     // ── Step 2: Wallet generation or import ────────────────────────
-    let (mut seed, address, mnemonic) = create_or_import_wallet(
-        config.generate,
-        config.import_mnemonic,
-        config.import_seed,
-    )?;
+    let (mut seed, address, mnemonic) =
+        create_or_import_wallet(config.generate, config.import_mnemonic, config.import_seed)?;
 
     // Display wallet info
     if let Some(ref m) = mnemonic {
@@ -305,7 +302,11 @@ mod tests {
         let result = run_wizard(config).unwrap();
 
         // Verify result
-        assert_eq!(result.address.len(), 58, "Algorand address should be 58 chars");
+        assert_eq!(
+            result.address.len(),
+            58,
+            "Algorand address should be 58 chars"
+        );
         assert!(
             result.keystore_path.contains("keystore.enc"),
             "Keystore path should contain keystore.enc"
@@ -344,7 +345,10 @@ mod tests {
         };
 
         let result = run_wizard(config).unwrap();
-        assert_eq!(result.address, address, "Imported address should match original");
+        assert_eq!(
+            result.address, address,
+            "Imported address should match original"
+        );
 
         // Verify keystore roundtrip
         let ks_path = crate::keystore_path(&data_dir);
@@ -594,8 +598,7 @@ mod tests {
         let original_addr = wallet::address_from_seed(&original_seed);
         let mnemonic = wallet::seed_to_mnemonic(&original_seed);
 
-        let (seed, address, m) =
-            create_or_import_wallet(false, Some(mnemonic), None).unwrap();
+        let (seed, address, m) = create_or_import_wallet(false, Some(mnemonic), None).unwrap();
         assert_eq!(seed, original_seed);
         assert_eq!(address, original_addr);
         assert!(m.is_none(), "Import should not return mnemonic");
@@ -607,8 +610,7 @@ mod tests {
         let original_addr = wallet::address_from_seed(&original_seed);
         let seed_hex = hex::encode(original_seed);
 
-        let (seed, address, m) =
-            create_or_import_wallet(false, None, Some(seed_hex)).unwrap();
+        let (seed, address, m) = create_or_import_wallet(false, None, Some(seed_hex)).unwrap();
         assert_eq!(seed, original_seed);
         assert_eq!(address, original_addr);
         assert!(m.is_none());

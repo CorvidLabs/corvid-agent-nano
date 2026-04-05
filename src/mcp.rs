@@ -78,14 +78,22 @@ struct RpcError {
 
 impl JsonRpcResponse {
     fn ok(id: Value, result: Value) -> Self {
-        Self { jsonrpc: "2.0", result: Some(result), error: None, id }
+        Self {
+            jsonrpc: "2.0",
+            result: Some(result),
+            error: None,
+            id,
+        }
     }
 
     fn err(id: Value, code: i32, message: impl Into<String>) -> Self {
         Self {
             jsonrpc: "2.0",
             result: None,
-            error: Some(RpcError { code, message: message.into() }),
+            error: Some(RpcError {
+                code,
+                message: message.into(),
+            }),
             id,
         }
     }
@@ -399,9 +407,7 @@ fn handle_list_messages(ctx: &McpContext, params: &Value) -> Result<Value, Strin
         })
         .map_err(|e| format!("{e}"))?;
 
-    let mut messages: Vec<Value> = rows
-        .filter_map(|r| r.ok())
-        .collect();
+    let mut messages: Vec<Value> = rows.filter_map(|r| r.ok()).collect();
     messages.reverse(); // show oldest first
 
     let text = serde_json::to_string_pretty(&messages).unwrap_or_default();
@@ -595,6 +601,7 @@ pub async fn run_mcp_server(ctx: McpContext) -> Result<()> {
 }
 
 /// Build an McpContext from the provided credentials and network config.
+#[allow(clippy::too_many_arguments)]
 pub async fn build_context(
     network_name: String,
     algod_url: String,
@@ -670,10 +677,7 @@ mod tests {
     fn tools_list_has_required_tools() {
         let list = tools_list();
         let tools = list["tools"].as_array().unwrap();
-        let names: Vec<&str> = tools
-            .iter()
-            .map(|t| t["name"].as_str().unwrap())
-            .collect();
+        let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert!(names.contains(&"send_message"));
         assert!(names.contains(&"list_contacts"));
         assert!(names.contains(&"add_contact"));
