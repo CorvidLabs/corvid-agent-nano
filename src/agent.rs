@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use algochat::{AlgoChat, AlgodClient, EncryptionKeyStorage, IndexerClient, MessageCache};
+use chrono::Utc;
 use ed25519_dalek::SigningKey;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -24,6 +25,8 @@ pub struct AgentLoopConfig {
     pub agent_address: String,
     /// Ed25519 signing key (for signing reply transactions).
     pub signing_key: SigningKey,
+    /// Optional shared health state updated by the message loop.
+    pub health_state: Option<Arc<tokio::sync::RwLock<crate::health::HealthState>>>,
 }
 
 impl Default for AgentLoopConfig {
@@ -34,6 +37,7 @@ impl Default for AgentLoopConfig {
             agent_name: "can".to_string(),
             agent_address: String::new(),
             signing_key: SigningKey::from_bytes(&[0u8; 32]),
+            health_state: None,
         }
     }
 }
@@ -102,6 +106,15 @@ pub async fn run_message_loop<A, I, S, M>(
     loop {
         match client.sync().await {
             Ok(messages) => {
+                // Update health: algod is reachable
+                if let Some(ref hs) = config.health_state {
+                    let mut s = hs.write().await;
+                    s.algod_connected = true;
+                    if !messages.is_empty() {
+                        s.last_message_at = Some(Utc::now());
+                    }
+                }
+
                 for msg in &messages {
                     info!(
                         from = %msg.sender,
@@ -183,6 +196,11 @@ pub async fn run_message_loop<A, I, S, M>(
             }
             Err(e) => {
                 warn!(error = %e, "sync failed — will retry");
+                // Update health: algod unreachable
+                if let Some(ref hs) = config.health_state {
+                    let mut s = hs.write().await;
+                    s.algod_connected = false;
+                }
             }
         }
 

@@ -24,6 +24,7 @@ pub struct WizardConfig {
 
 /// Result of a completed wizard run.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct WizardResult {
     pub network: crate::Network,
     pub address: String,

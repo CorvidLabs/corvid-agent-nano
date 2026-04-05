@@ -29,6 +29,7 @@ pub struct Group {
 /// A group member entry.
 #[derive(Debug, Clone)]
 pub struct GroupMember {
+    #[allow(dead_code)]
     pub group_name: String,
     pub address: String,
     pub label: Option<String>,
