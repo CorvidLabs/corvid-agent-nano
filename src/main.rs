@@ -19,7 +19,9 @@ mod algorand;
 mod bridge;
 mod contacts;
 mod groups;
+mod health;
 mod keystore;
+mod mcp;
 mod sidecar;
 mod storage;
 mod transaction;
@@ -32,6 +34,20 @@ use storage::{SqliteKeyStorage, SqliteMessageCache};
 use algorand::{HttpAlgodClient, HttpIndexerClient};
 use contacts::ContactStore;
 use groups::GroupStore;
+
+// ---------------------------------------------------------------------------
+// Log format
+// ---------------------------------------------------------------------------
+
+/// Output format for structured logs.
+#[derive(Debug, Clone, Copy, ValueEnum, Default)]
+enum LogFormat {
+    /// Human-readable pretty-printed logs (default).
+    #[default]
+    Pretty,
+    /// Machine-readable JSON lines (for log aggregation systems).
+    Json,
+}
 
 // ---------------------------------------------------------------------------
 // Network presets
@@ -107,6 +123,10 @@ struct Cli {
     /// Data directory for persistent storage
     #[arg(long, default_value = "./data", global = true)]
     data_dir: String,
+
+    /// Log output format
+    #[arg(long, default_value = "pretty", global = true, env = "CAN_LOG_FORMAT")]
+    log_format: LogFormat,
 }
 
 #[derive(Subcommand)]
@@ -204,6 +224,51 @@ enum Command {
         /// Run in direct P2P mode (no hub forwarding — receive and store only)
         #[arg(long, default_value = "false")]
         no_hub: bool,
+
+        /// Enable health check HTTP server on this port (0 = disabled)
+        #[arg(long, default_value = "0", env = "CAN_HEALTH_PORT")]
+        health_port: u16,
+    },
+
+    /// Start an MCP server over stdio for AI agent integration
+    ///
+    /// Exposes nano's AlgoChat capabilities as MCP tools usable from Claude Code,
+    /// Cursor, or any MCP-compatible AI assistant.
+    ///
+    /// Add to Claude Code settings.json:
+    ///   { "mcpServers": { "nano": { "command": "can", "args": ["mcp"] } } }
+    Mcp {
+        /// Algorand network preset
+        #[arg(long, default_value = "localnet", env = "CAN_NETWORK")]
+        network: Network,
+
+        /// Override: Algorand node URL
+        #[arg(long, env = "CAN_ALGOD_URL")]
+        algod_url: Option<String>,
+
+        /// Override: Algorand node token
+        #[arg(long, env = "CAN_ALGOD_TOKEN")]
+        algod_token: Option<String>,
+
+        /// Override: Algorand indexer URL
+        #[arg(long, env = "CAN_INDEXER_URL")]
+        indexer_url: Option<String>,
+
+        /// Override: Algorand indexer token
+        #[arg(long, env = "CAN_INDEXER_TOKEN")]
+        indexer_token: Option<String>,
+
+        /// Agent seed (hex). If not provided, loads from keystore.
+        #[arg(long, env = "CAN_SEED")]
+        seed: Option<String>,
+
+        /// Agent Algorand address. Required if --seed is provided.
+        #[arg(long, env = "CAN_ADDRESS")]
+        address: Option<String>,
+
+        /// Keystore password (for loading from keystore)
+        #[arg(long, env = "CAN_PASSWORD")]
+        password: Option<String>,
     },
 
     /// Send an encrypted message to a contact, address, or group
@@ -685,6 +750,7 @@ async fn cmd_run(
     poll_interval: u64,
     no_plugins: bool,
     no_hub: bool,
+    health_port: u16,
     data_dir: &str,
 ) -> Result<()> {
     // First-run check: if no keystore and no seed flag, guide the user
@@ -728,6 +794,11 @@ async fn cmd_run(
     // Ensure data directory exists
     let data_path = std::path::Path::new(data_dir);
     std::fs::create_dir_all(data_path)?;
+
+    // Health state (shared between the message loop and health HTTP server)
+    let health_state = Arc::new(tokio::sync::RwLock::new(health::HealthState::new(
+        network.to_string(),
+    )));
 
     // Build Algorand clients
     let algod = HttpAlgodClient::new(&algod_url, &algod_token);
@@ -937,11 +1008,23 @@ async fn cmd_run(
         agent_name: name.clone(),
         agent_address: agent_address.clone(),
         signing_key,
+        health_state: Some(Arc::clone(&health_state)),
     };
 
     let message_task = tokio::spawn(async move {
         agent::run_message_loop(loop_client, loop_algod, loop_config).await;
     });
+
+    // Optional health check server
+    let health_task = if health_port > 0 {
+        println!("  Health:   http://0.0.0.0:{}/health\n", health_port);
+        let hs = Arc::clone(&health_state);
+        Some(tokio::spawn(async move {
+            health::run_health_server(health_port, hs).await;
+        }))
+    } else {
+        None
+    };
 
     info!("can agent ready — listening for AlgoChat messages");
 
@@ -955,6 +1038,11 @@ async fn cmd_run(
                 Err(e) => tracing::error!(error = %e, "message loop panicked"),
             }
         }
+    }
+
+    // Cancel health server if running
+    if let Some(task) = health_task {
+        task.abort();
     }
 
     // Shut down plugin host sidecar
@@ -2118,15 +2206,26 @@ async fn cmd_register(
 
 // ---------------------------------------------------------------------------
 
+fn init_tracing(log_format: LogFormat) {
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| "info".into());
+    match log_format {
+        LogFormat::Pretty => {
+            tracing_subscriber::fmt().with_env_filter(filter).init();
+        }
+        LogFormat::Json => {
+            tracing_subscriber::fmt()
+                .json()
+                .with_env_filter(filter)
+                .init();
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
-        )
-        .init();
-
     let cli = Cli::parse();
+    init_tracing(cli.log_format);
     let data_dir = &cli.data_dir;
 
     match cli.command {
@@ -2169,6 +2268,7 @@ async fn main() -> Result<()> {
             poll_interval,
             no_plugins,
             no_hub,
+            health_port,
         } => {
             cmd_run(
                 network,
@@ -2184,9 +2284,48 @@ async fn main() -> Result<()> {
                 poll_interval,
                 no_plugins,
                 no_hub,
+                health_port,
                 data_dir,
             )
             .await
+        }
+
+        Command::Mcp {
+            network,
+            algod_url,
+            algod_token,
+            indexer_url,
+            indexer_token,
+            seed,
+            address,
+            password,
+        } => {
+            let net = network.defaults();
+            let algod_url = algod_url.unwrap_or(net.algod_url);
+            let algod_token = algod_token.unwrap_or(net.algod_token);
+            let indexer_url = indexer_url.unwrap_or(net.indexer_url);
+            let indexer_token = indexer_token.unwrap_or(net.indexer_token);
+
+            let (seed_bytes, agent_address) = load_identity(
+                seed.as_deref(),
+                address.as_deref(),
+                password.as_deref(),
+                data_dir,
+            )?;
+
+            let ctx = mcp::build_context(
+                network.to_string(),
+                algod_url,
+                algod_token,
+                indexer_url,
+                indexer_token,
+                seed_bytes,
+                agent_address,
+                data_dir.to_string(),
+            )
+            .await?;
+
+            mcp::run_mcp_server(ctx).await
         }
 
         Command::Send {
