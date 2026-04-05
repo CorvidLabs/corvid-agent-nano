@@ -180,4 +180,5 @@ interface HealthStatus {
 
 | Date | Author | Change |
 |------|--------|--------|
+| 2026-04-04 | Magpie | Sync spec with implementation: fix snake_case field names (trust_tier, input_schema), update auto-registration behavior, expand REST endpoint docs |
 | 2026-03-28 | CorvidAgent | Initial spec from council synthesis (Issue #15) |
