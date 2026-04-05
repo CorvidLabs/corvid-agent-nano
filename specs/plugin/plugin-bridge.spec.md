@@ -62,16 +62,21 @@ Tool names are namespaced as `plugin:<pluginId>:<toolName>` to avoid collisions 
 
 ### REST Endpoints
 
-| Route | Method | Response | Status | Description |
-|-------|--------|----------|--------|-------------|
-| `/api/plugins` | GET | `{ plugins: PluginManifest[] }` | 200 | List all plugins with tools |
-| `/api/plugins` | GET | `{ error: string, plugins: [] }` | 503 | Plugin host not connected |
-| `/api/plugins` | GET | `{ error: string, plugins: [] }` | 502 | Plugin host communication error |
-| `/api/plugins/:id/invoke/:tool` | POST | `{ result: string }` | 200 | Tool invocation succeeded |
-| `/api/plugins/:id/invoke/:tool` | POST | `{ error: string }` | 503 | Plugin draining (retryable) |
-| `/api/plugins/:id/invoke/:tool` | POST | `{ error: string }` | 500 | Tool invocation error |
-| `/api/plugins/:id/invoke/:tool` | POST | `{ error: string }` | 503 | Plugin host not connected |
-| `/api/plugins/:id/invoke/:tool` | POST | `{ error: string }` | 400 | Missing plugin id or tool name |
+**GET /api/plugins** — List all plugins and their tools.
+```
+Response (200): { plugins: PluginManifest[] }
+Response (502): { error: string, plugins: [] }  — Plugin host communication error
+Response (503): { error: string, plugins: [] }  — Plugin host not connected
+```
+
+**POST /api/plugins/:id/invoke/:tool** — Invoke a plugin tool.
+```
+Request body: any JSON value matching the tool's input_schema
+Response (200): { result: string }
+Response (400): { error: string }  — Missing :id or :tool parameters
+Response (500): { error: string }  — Tool invocation failed
+Response (503): { error: string }  — Plugin host not connected or draining
+```
 
 ### TypeScript Types
 
