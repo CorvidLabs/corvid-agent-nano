@@ -25,6 +25,14 @@ interface PluginListItem extends PluginManifest {
   tools: ToolInfo[];
 }
 
+// ── Validation ────────────────────────────────────────────────────────
+
+/** Plugin IDs: lowercase alphanumeric + hyphens, 1–50 chars. Mirrors Rust loader validation. */
+const PLUGIN_ID_RE = /^[a-z][a-z0-9-]{0,49}$/;
+
+/** Tool names: lowercase alphanumeric, hyphens, underscores, 1–64 chars. */
+const TOOL_NAME_RE = /^[a-z][a-z0-9_-]{0,63}$/;
+
 // ── Route registration ─────────────────────────────────────────────────
 
 export function registerPluginRoutes(router: Router, bridge: PluginBridge): void {
@@ -78,6 +86,12 @@ export function registerPluginRoutes(router: Router, bridge: PluginBridge): void
         { status: 400 },
       );
     }
+    if (!PLUGIN_ID_RE.test(id)) {
+      return Response.json({ error: "invalid plugin id" }, { status: 400 });
+    }
+    if (!TOOL_NAME_RE.test(tool)) {
+      return Response.json({ error: "invalid tool name" }, { status: 400 });
+    }
 
     let input: unknown;
     try {
@@ -92,8 +106,14 @@ export function registerPluginRoutes(router: Router, bridge: PluginBridge): void
     } catch (err) {
       const error = err as Error & { status?: number; retryable?: boolean };
       const status = error.status ?? 500;
+      // Only surface explicit, expected error messages. For unexpected 500s,
+      // return a generic message to avoid leaking internal details.
+      const message =
+        status === 503 || status === 400
+          ? error.message
+          : "plugin invocation failed";
       return Response.json(
-        { error: error.message, retryable: error.retryable ?? false },
+        { error: message, retryable: error.retryable ?? false },
         { status },
       );
     }

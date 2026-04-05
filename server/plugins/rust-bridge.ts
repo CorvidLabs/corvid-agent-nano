@@ -7,6 +7,7 @@
  */
 
 import { connect, type Socket } from "node:net";
+import { resolve as resolvePath } from "node:path";
 import { encode, decode } from "@msgpack/msgpack";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -69,6 +70,12 @@ const INVOKE_TIMEOUT: Record<string, number> = {
   untrusted: 1_000,
 };
 
+const VALID_TRUST_TIERS = new Set<string>(["trusted", "verified", "untrusted"]);
+
+/** Maximum bytes buffered between newlines before we drop the connection.
+ *  Prevents OOM if the plugin host sends data without newlines. */
+const MAX_BUFFER_BYTES = 1024 * 1024; // 1 MiB
+
 // ── Bridge ─────────────────────────────────────────────────────────────
 
 export class PluginBridge {
@@ -92,7 +99,13 @@ export class PluginBridge {
 
   /** Connect to the plugin host Unix socket. */
   async connect(socketPath: string): Promise<void> {
-    this.socketPath = socketPath;
+    // Normalize and validate that the path ends in .sock to prevent
+    // accidental or malicious connection to arbitrary sockets.
+    const normalized = resolvePath(socketPath);
+    if (!normalized.endsWith(".sock")) {
+      throw new Error(`invalid socket path: must end in .sock`);
+    }
+    this.socketPath = normalized;
     this.closed = false;
     return this.doConnect();
   }
@@ -190,7 +203,8 @@ export class PluginBridge {
     // Fetch manifests to get tier info
     const manifests = await this.listManifests();
     for (const m of manifests) {
-      this.pluginTiers.set(m.id, m.trust_tier);
+      const tier = VALID_TRUST_TIERS.has(m.trust_tier) ? m.trust_tier : "untrusted";
+      this.pluginTiers.set(m.id, tier);
     }
 
     // Fetch all tools and register them
@@ -254,6 +268,14 @@ export class PluginBridge {
 
   private handleData(chunk: string): void {
     this.buffer += chunk;
+
+    // Guard against unbounded buffer growth (e.g. host sends data with no newlines).
+    if (this.buffer.length > MAX_BUFFER_BYTES) {
+      console.error("[plugin-bridge] buffer overflow — closing connection");
+      this.socket?.destroy();
+      return;
+    }
+
     let newlineIdx: number;
     while ((newlineIdx = this.buffer.indexOf("\n")) !== -1) {
       const line = this.buffer.slice(0, newlineIdx);

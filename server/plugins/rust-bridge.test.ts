@@ -251,12 +251,158 @@ describe("PluginBridge", () => {
       expect(name).toMatch(/^plugin:[^:]+:[^:]+$/);
     }
   });
+
+  test("connect rejects non-.sock socket path", async () => {
+    await expect(bridge.connect("/tmp/evil-socket")).rejects.toThrow("invalid socket path");
+    await expect(bridge.connect("/etc/passwd")).rejects.toThrow("invalid socket path");
+  });
+
+  test("connect accepts .sock path", async () => {
+    // Should not throw on the path check (may still fail to connect, but error will be network)
+    await bridge.connect(host.socketPath);
+    expect(bridge.connected).toBe(true);
+  });
+
+  test("untrusted tier used for unknown plugin", async () => {
+    // Plugin with unknown tier string — should fall back to 'untrusted' timeout
+    host.handlers["plugin.list"] = () => ({
+      plugins: [
+        {
+          id: "corvid-algo-oracle",
+          version: "1.0.0",
+          author: "corvidlabs",
+          description: "Oracle plugin",
+          capabilities: [],
+          trust_tier: "superadmin", // invalid tier
+          tools: [],
+        },
+      ],
+    });
+    host.handlers["plugin.invoke"] = (params: unknown) => {
+      const p = params as { pluginId: string; tool: string };
+      return { result: `invoked ${p.pluginId}:${p.tool}` };
+    };
+
+    await bridge.connect(host.socketPath);
+    await new Promise((r) => setTimeout(r, 100));
+
+    // Should still invoke (tier falls back to untrusted timeout of 1s)
+    const result = await bridge.invoke("corvid-algo-oracle", "set_threshold", {});
+    expect(result).toBe("invoked corvid-algo-oracle:set_threshold");
+  });
+
+  test("buffer overflow closes socket", async () => {
+    await bridge.connect(host.socketPath);
+    expect(bridge.connected).toBe(true);
+
+    // Send 1.1 MiB of data without any newline
+    const client = host.clients[0]!;
+    const chunk = "x".repeat(1024 * 1024 + 100);
+    client.write(chunk);
+
+    // Give bridge a moment to process and close
+    await new Promise((r) => setTimeout(r, 100));
+    expect(bridge.connected).toBe(false);
+  });
 });
 
-describe("registerPluginRoutes", () => {
-  // Import here to avoid issues if the module has side effects
-  test("module exports registerPluginRoutes", async () => {
-    const mod = await import("../routes/plugins");
-    expect(typeof mod.registerPluginRoutes).toBe("function");
+describe("registerPluginRoutes — input validation", () => {
+  function makeMockBridge(connected = true): PluginBridge {
+    return {
+      connected,
+      invoke: async () => "ok",
+      listManifests: async () => [],
+      listTools: async () => [],
+    } as unknown as import("./rust-bridge").PluginBridge;
+  }
+
+  function makeRouter() {
+    const routes: Record<string, (ctx: { params: Record<string, string>; json(): Promise<unknown> }) => Promise<Response> | Response> = {};
+    return {
+      get(path: string, handler: typeof routes[string]) { routes[`GET ${path}`] = handler; },
+      post(path: string, handler: typeof routes[string]) { routes[`POST ${path}`] = handler; },
+      routes,
+    };
+  }
+
+  async function invokeRoute(
+    router: ReturnType<typeof makeRouter>,
+    id: string,
+    tool: string,
+    body: unknown = {},
+  ): Promise<Response> {
+    const handler = router.routes[`POST /api/plugins/:id/invoke/:tool`]!;
+    return handler({ params: { id, tool }, json: async () => body }) as Promise<Response>;
+  }
+
+  test("valid id and tool pass through", async () => {
+    const { registerPluginRoutes } = await import("../routes/plugins");
+    const bridge = makeMockBridge(true);
+    const router = makeRouter();
+    registerPluginRoutes(router, bridge);
+
+    const resp = await invokeRoute(router, "my-plugin", "do-thing", {});
+    expect(resp.status).toBe(200);
+  });
+
+  test("invalid plugin id rejected with 400", async () => {
+    const { registerPluginRoutes } = await import("../routes/plugins");
+    const bridge = makeMockBridge(true);
+    const router = makeRouter();
+    registerPluginRoutes(router, bridge);
+
+    for (const bad of ["../etc/passwd", "CAPS", "has space", "x".repeat(60), ""]) {
+      if (bad === "") continue; // empty string caught by existing check
+      const resp = await invokeRoute(router, bad, "valid-tool", {});
+      expect(resp.status).toBe(400);
+      const body = await resp.json() as { error: string };
+      expect(body.error).toBe("invalid plugin id");
+    }
+  });
+
+  test("invalid tool name rejected with 400", async () => {
+    const { registerPluginRoutes } = await import("../routes/plugins");
+    const bridge = makeMockBridge(true);
+    const router = makeRouter();
+    registerPluginRoutes(router, bridge);
+
+    for (const bad of ["../etc/passwd", "CAPS_BAD", "has space", "x".repeat(70)]) {
+      const resp = await invokeRoute(router, "valid-plugin", bad, {});
+      expect(resp.status).toBe(400);
+      const body = await resp.json() as { error: string };
+      expect(body.error).toBe("invalid tool name");
+    }
+  });
+
+  test("503 errors propagate message through", async () => {
+    const { registerPluginRoutes } = await import("../routes/plugins");
+    const bridge = {
+      connected: true,
+      invoke: async () => { throw Object.assign(new Error("plugin my-plugin is draining"), { status: 503, retryable: true }); },
+    } as unknown as PluginBridge;
+    const router = makeRouter();
+    registerPluginRoutes(router, bridge);
+
+    const resp = await invokeRoute(router, "my-plugin", "do-thing");
+    expect(resp.status).toBe(503);
+    const body = await resp.json() as { error: string; retryable: boolean };
+    expect(body.error).toContain("draining");
+    expect(body.retryable).toBe(true);
+  });
+
+  test("unexpected 500 errors do not leak internal message", async () => {
+    const { registerPluginRoutes } = await import("../routes/plugins");
+    const bridge = {
+      connected: true,
+      invoke: async () => { throw new Error("internal db path: /var/data/secret.db"); },
+    } as unknown as PluginBridge;
+    const router = makeRouter();
+    registerPluginRoutes(router, bridge);
+
+    const resp = await invokeRoute(router, "my-plugin", "do-thing");
+    expect(resp.status).toBe(500);
+    const body = await resp.json() as { error: string };
+    expect(body.error).toBe("plugin invocation failed");
+    expect(body.error).not.toContain("secret");
   });
 });
