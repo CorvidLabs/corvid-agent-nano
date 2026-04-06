@@ -19,6 +19,7 @@ Lightweight Rust CLI agent for the [AlgoChat](https://github.com/CorvidLabs/corv
 - **Single binary**, instant startup, minimal footprint
 - **End-to-end encrypted** messaging (X25519 + ChaCha20-Poly1305) via Algorand transactions
 - **Secure keystore** with Argon2id key derivation and password protection
+- **MCP server** (`can mcp`) — expose AlgoChat as tools for Claude Code, Cursor, and any MCP-compatible client
 - **Plugin system** (WASM) for extending agent capabilities
 - **Works with** [corvid-agent](https://github.com/CorvidLabs/corvid-agent) platform and other AlgoChat-compatible agents
 
@@ -36,7 +37,9 @@ corvid-agent-nano/
 │   ├── transaction.rs       # Transaction building/signing
 │   ├── wallet.rs            # Wallet generation + mnemonics
 │   ├── bridge.rs            # JSON-RPC plugin host client
-│   └── sidecar.rs           # Plugin host process manager
+│   ├── sidecar.rs           # Plugin host process manager
+│   ├── mcp.rs               # MCP server implementation
+│   └── health.rs            # Health check endpoint
 ├── crates/                  # Plugin system
 │   ├── corvid-plugin-sdk/   # WASM plugin SDK
 │   ├── corvid-plugin-host/  # Plugin runtime host
@@ -52,6 +55,7 @@ corvid-agent-nano/
 - **Edge agent** — runs on constrained devices, reports to hub
 - **Bridge bot** — connects platforms the main agent doesn't cover
 - **Task runner** — executes specialized workloads, reports results
+- **AI assistant tools** — Expose agent capabilities via MCP to Claude Code and Cursor
 
 ## Install
 
@@ -127,7 +131,7 @@ The agent polls for incoming messages and can forward to a hub (if configured).
 ### All Commands Quick Reference
 
 | Command | Purpose |
-|---------|---------|
+|---------|---------| 
 | `setup` / `init` | Interactive wallet setup wizard |
 | `import` | Import wallet from mnemonic or seed |
 | `info` | Display wallet and agent details |
@@ -139,6 +143,7 @@ The agent polls for incoming messages and can forward to a hub (if configured).
 | `inbox` | View and manage received messages |
 | `contacts` | Manage PSK-encrypted contacts |
 | `groups` | Create and manage broadcast channels |
+| `mcp` | Start MCP server for Claude Code / Cursor |
 | `plugin` | List and invoke plugins |
 | `change-password` | Rotate keystore encryption password |
 
@@ -202,6 +207,61 @@ can send --to scouting-team --message "Status update" --data-dir ~/.corvid
 ```
 
 For more details, see [Group Channels Guide](https://corvidlabs.github.io/corvid-agent-nano/guides/group-channels.html).
+
+## MCP Integration (Claude Code & Cursor)
+
+Start corvid-agent-nano as an MCP server to expose AlgoChat capabilities as tools in Claude Code, Cursor, and other MCP clients:
+
+```bash
+can mcp --network testnet --password mypassword
+```
+
+This starts a JSON-RPC 2.0 MCP server over stdin/stdout with tools for:
+- Sending encrypted messages
+- Listing and managing contacts
+- Checking balance and status
+
+Add to your Claude Code config:
+
+```json
+{
+  "mcpServers": {
+    "nano": {
+      "command": "can",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+See the [MCP Integration Guide](https://corvidlabs.github.io/corvid-agent-nano/guides/mcp-integration.html) for detailed setup instructions with Claude Code and Cursor.
+
+## Monitoring & Deployment
+
+### Health Check Endpoint
+
+Enable an HTTP health check endpoint for Docker/systemd monitoring:
+
+```bash
+can run --data-dir ~/.corvid --health-port 9090
+```
+
+Then check status with:
+
+```bash
+curl http://localhost:9090/health
+# Returns: { "status": "healthy", "network": "localnet", "uptime_secs": 123, ... }
+```
+
+### JSON Logging
+
+For log aggregation and structured analysis, enable JSON log format:
+
+```bash
+can run --data-dir ~/.corvid --log-format json
+```
+
+All commands support the global `--log-format json` flag.
 
 ## Connecting to corvid-agent (Hub)
 
@@ -269,7 +329,7 @@ RUST_LOG=info can run --data-dir ~/.corvid --hub-url http://localhost:3578
 ### Network Configuration
 
 | Network | Algod URL | Indexer URL | Flag |
-|---------|-----------|-------------|---------|
+|---------|-----------|-------------|---------| 
 | Localnet | `http://localhost:4001` | `http://localhost:8980` | `--network localnet` (default) |
 | Testnet | `https://testnet-api.4160.nodely.dev` | `https://testnet-idx.4160.nodely.dev` | `--network testnet` |
 | Mainnet | `https://mainnet-api.4160.nodely.dev` | `https://mainnet-idx.4160.nodely.dev` | `--network mainnet` |
@@ -286,8 +346,8 @@ RUST_LOG=info can run --data-dir ~/.corvid --hub-url http://localhost:3578
 For comprehensive guides, architecture details, and API reference, see the [full documentation](https://corvidlabs.github.io/corvid-agent-nano/):
 
 - **[Getting Started](https://corvidlabs.github.io/corvid-agent-nano/getting-started/)** — Installation, quick start, setup wizard, network configuration
-- **[Commands Reference](https://corvidlabs.github.io/corvid-agent-nano/commands/overview.html)** — Complete command documentation for all 14 subcommands
-- **[Guides](https://corvidlabs.github.io/corvid-agent-nano/guides/)** — Hub integration, contacts, groups, P2P mode, plugins, plugin development
+- **[Commands Reference](https://corvidlabs.github.io/corvid-agent-nano/commands/overview.html)** — Complete command documentation for all 15 subcommands
+- **[Guides](https://corvidlabs.github.io/corvid-agent-nano/guides/)** — Hub integration, contacts, groups, P2P mode, MCP integration, plugins, plugin development
 - **[Architecture](https://corvidlabs.github.io/corvid-agent-nano/architecture/)** — Security model, data storage, cryptographic details
 - **[FAQ](https://corvidlabs.github.io/corvid-agent-nano/reference/faq.html)** — Frequently asked questions and troubleshooting
 
