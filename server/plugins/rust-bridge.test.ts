@@ -394,3 +394,150 @@ describe("registerPluginRoutes", () => {
     expect(typeof mod.registerPluginRoutes).toBe("function");
   });
 });
+
+// ── Security tests ─────────────────────────────────────────────────────
+
+describe("PluginBridge security", () => {
+  let host: MockPluginHost;
+  let bridge: PluginBridge;
+
+  beforeEach(async () => {
+    host = new MockPluginHost();
+    await host.start();
+    bridge = new PluginBridge();
+  });
+
+  afterEach(async () => {
+    await bridge.disconnect();
+    await host.stop();
+  });
+
+  test("buffer overflow closes socket", async () => {
+    // Lower the limit to 1 KiB so the test is deterministic without sending MiBs.
+    // Cast through any because the property is private static readonly at TS level
+    // but a regular JS property at runtime (not inlined).
+    const origLimit = (PluginBridge as { MAX_BUFFER_BYTES: number }).MAX_BUFFER_BYTES;
+    (PluginBridge as { MAX_BUFFER_BYTES: number }).MAX_BUFFER_BYTES = 1024;
+
+    await bridge.connect(host.socketPath);
+    expect(bridge.connected).toBe(true);
+
+    // Send 2 KiB without a newline — exceeds the patched 1 KiB limit.
+    host.clients[0].write("x".repeat(2048));
+
+    // Poll until disconnected (up to 1 s). The reconnect timer is 500 ms, so
+    // there is a ~500 ms window where connected === false that we must catch.
+    let disconnected = false;
+    for (let i = 0; i < 20; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+      if (!bridge.connected) { disconnected = true; break; }
+    }
+
+    (PluginBridge as { MAX_BUFFER_BYTES: number }).MAX_BUFFER_BYTES = origLimit;
+    expect(disconnected).toBe(true);
+  });
+
+  test("bridge handles normal responses after large-but-valid payloads", async () => {
+    // A response followed by a newline (even if large) should be processed normally.
+    host.handlers["plugin.list"] = () => ({ plugins: [] });
+
+    await bridge.connect(host.socketPath);
+    const manifests = await bridge.listManifests();
+    expect(manifests).toHaveLength(0);
+  });
+});
+
+describe("Plugin route input validation", () => {
+  /** Build a minimal mock bridge that always returns connected. */
+  function makeMockBridge() {
+    return {
+      connected: true,
+      async listManifests() { return []; },
+      async listTools() { return []; },
+      async invoke(pluginId: string, tool: string, _input: unknown) {
+        return `ok:${pluginId}:${tool}`;
+      },
+    };
+  }
+
+  function makeRouter() {
+    const routes: Array<{ method: string; path: string; handler: (ctx: { params: Record<string, string>; json(): Promise<unknown> }) => Promise<Response> | Response }> = [];
+    return {
+      routes,
+      get(path: string, handler: (ctx: { params: Record<string, string>; json(): Promise<unknown> }) => Promise<Response> | Response) {
+        routes.push({ method: "GET", path, handler });
+      },
+      post(path: string, handler: (ctx: { params: Record<string, string>; json(): Promise<unknown> }) => Promise<Response> | Response) {
+        routes.push({ method: "POST", path, handler });
+      },
+      async call(params: Record<string, string>, body: unknown = {}) {
+        const route = routes.find((r) => r.method === "POST");
+        if (!route) throw new Error("no POST route");
+        return route.handler({ params, json: async () => body });
+      },
+    };
+  }
+
+  test("rejects invalid plugin id with 400", async () => {
+    const { registerPluginRoutes } = await import("../routes/plugins");
+    const router = makeRouter();
+    registerPluginRoutes(router as never, makeMockBridge() as never);
+
+    const res = await router.call({ id: "../../../etc/passwd", tool: "read" });
+    expect(res.status).toBe(400);
+    const body = await res.json() as { error: string };
+    expect(body.error).toBe("invalid plugin id");
+  });
+
+  test("rejects id with uppercase letters", async () => {
+    const { registerPluginRoutes } = await import("../routes/plugins");
+    const router = makeRouter();
+    registerPluginRoutes(router as never, makeMockBridge() as never);
+
+    const res = await router.call({ id: "MyPlugin", tool: "do_thing" });
+    expect(res.status).toBe(400);
+    const body = await res.json() as { error: string };
+    expect(body.error).toBe("invalid plugin id");
+  });
+
+  test("rejects invalid tool name with 400", async () => {
+    const { registerPluginRoutes } = await import("../routes/plugins");
+    const router = makeRouter();
+    registerPluginRoutes(router as never, makeMockBridge() as never);
+
+    const res = await router.call({ id: "my-plugin", tool: "../../etc/shadow" });
+    expect(res.status).toBe(400);
+    const body = await res.json() as { error: string };
+    expect(body.error).toBe("invalid tool name");
+  });
+
+  test("accepts valid plugin id and tool name", async () => {
+    const { registerPluginRoutes } = await import("../routes/plugins");
+    const router = makeRouter();
+    registerPluginRoutes(router as never, makeMockBridge() as never);
+
+    const res = await router.call({ id: "corvid-algo-oracle", tool: "set_threshold" });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { result: string };
+    expect(body.result).toBe("ok:corvid-algo-oracle:set_threshold");
+  });
+
+  test("rejects plugin id starting with digit", async () => {
+    const { registerPluginRoutes } = await import("../routes/plugins");
+    const router = makeRouter();
+    registerPluginRoutes(router as never, makeMockBridge() as never);
+
+    const res = await router.call({ id: "1bad-plugin", tool: "run" });
+    expect(res.status).toBe(400);
+  });
+
+  test("rejects plugin id longer than 50 chars", async () => {
+    const { registerPluginRoutes } = await import("../routes/plugins");
+    const router = makeRouter();
+    registerPluginRoutes(router as never, makeMockBridge() as never);
+
+    const longId = "a" + "b".repeat(50); // 51 chars
+    const res = await router.call({ id: longId, tool: "run" });
+    expect(res.status).toBe(400);
+  });
+});

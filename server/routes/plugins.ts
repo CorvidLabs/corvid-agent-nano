@@ -7,6 +7,14 @@
 
 import type { PluginBridge, PluginManifest, ToolInfo } from "../plugins/rust-bridge";
 
+// ── Validation ─────────────────────────────────────────────────────────
+
+/** Matches the same regex enforced by the Rust loader: ^[a-z][a-z0-9-]{0,49}$ */
+const PLUGIN_ID_RE = /^[a-z][a-z0-9-]{0,49}$/;
+
+/** Tool names from plugin manifests are lowercase with underscores. */
+const TOOL_NAME_RE = /^[a-z_][a-z0-9_]{0,63}$/;
+
 // ── Types ──────────────────────────────────────────────────────────────
 
 interface Router {
@@ -24,14 +32,6 @@ type RouteHandler = (ctx: RouteContext) => Promise<Response> | Response;
 interface PluginListItem extends PluginManifest {
   tools: ToolInfo[];
 }
-
-// ── Security constants ─────────────────────────────────────────────────
-
-/** Plugin IDs must match the host's manifest ID regex. */
-const PLUGIN_ID_RE = /^[a-z][a-z0-9-]{0,49}$/;
-
-/** Tool names: lowercase letters, digits, hyphens, underscores. */
-const TOOL_NAME_RE = /^[a-z][a-z0-9_-]{0,63}$/;
 
 // ── Route registration ─────────────────────────────────────────────────
 
@@ -87,11 +87,6 @@ export function registerPluginRoutes(router: Router, bridge: PluginBridge): void
       );
     }
 
-    // Validate parameter formats to reject obviously malformed requests before
-    // they reach the bridge. Plugin IDs follow the spec-mandated pattern;
-    // tool names use the snake_case convention observed across all plugins.
-    const PLUGIN_ID_RE = /^[a-z][a-z0-9-]{0,49}$/;
-    const TOOL_NAME_RE = /^[a-z][a-z0-9_-]{0,63}$/;
     if (!PLUGIN_ID_RE.test(id) || !TOOL_NAME_RE.test(tool)) {
       return Response.json(
         { error: "invalid plugin id or tool name format" },
