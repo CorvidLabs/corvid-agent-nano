@@ -395,6 +395,52 @@ enum Command {
         action: PluginAction,
     },
 
+    /// Fund your agent from the localnet KMD faucet (or show instructions for testnet/mainnet)
+    Fund {
+        /// Algorand network preset
+        #[arg(long, default_value = "localnet", env = "CAN_NETWORK")]
+        network: Network,
+
+        /// Override: Algorand node URL
+        #[arg(long, env = "CAN_ALGOD_URL")]
+        algod_url: Option<String>,
+
+        /// Override: Algorand node token
+        #[arg(long, env = "CAN_ALGOD_TOKEN")]
+        algod_token: Option<String>,
+
+        /// Target address (defaults to keystore address)
+        #[arg(long)]
+        address: Option<String>,
+
+        /// KMD endpoint URL (localnet only)
+        #[arg(long, default_value = "http://localhost:4002")]
+        kmd_url: String,
+
+        /// KMD API token
+        #[arg(long)]
+        kmd_token: Option<String>,
+
+        /// Amount in microAlgos (default: 10 ALGO = 10_000_000)
+        #[arg(long, default_value = "10000000")]
+        amount: u64,
+    },
+
+    /// Register your agent with the corvid-agent hub
+    Register {
+        /// Agent Algorand address (defaults to keystore address)
+        #[arg(long)]
+        address: Option<String>,
+
+        /// Display name for this agent
+        #[arg(long)]
+        name: String,
+
+        /// Hub URL
+        #[arg(long, default_value = "http://localhost:3578")]
+        hub_url: String,
+    },
+
     /// Start an MCP server over stdio (for Claude Code / AI agent integration)
     Mcp {
         /// Algorand network preset
@@ -1352,6 +1398,48 @@ async fn cmd_balance(
 }
 
 #[allow(clippy::too_many_arguments)]
+async fn cmd_balance(
+    network: Network,
+    algod_url: Option<String>,
+    algod_token: Option<String>,
+    seed_hex: Option<String>,
+    address: Option<String>,
+    password: Option<String>,
+    data_dir: &str,
+) -> Result<()> {
+    use algochat::AlgodClient;
+
+    let net = network.defaults();
+    let algod_url = algod_url.unwrap_or(net.algod_url);
+    let algod_token = algod_token.unwrap_or(net.algod_token);
+
+    let (_seed, addr) = load_identity(
+        seed_hex.as_deref(),
+        address.as_deref(),
+        password.as_deref(),
+        data_dir,
+    )?;
+
+    let algod = HttpAlgodClient::new(&algod_url, &algod_token);
+    let info = algod.get_account_info(&addr).await?;
+    let algo = info.amount as f64 / 1_000_000.0;
+    let min_algo = info.min_balance as f64 / 1_000_000.0;
+    let available = algo - min_algo;
+
+    println!("{}", ui::balance(algo));
+    if available < algo {
+        println!(
+            "  {} {:.6} ALGO  {} {:.6} ALGO",
+            "Available:".dimmed(),
+            available,
+            "Min balance:".dimmed(),
+            min_algo,
+        );
+    }
+
+    Ok(())
+}
+
 async fn cmd_status(
     network: Network,
     algod_url: Option<String>,
