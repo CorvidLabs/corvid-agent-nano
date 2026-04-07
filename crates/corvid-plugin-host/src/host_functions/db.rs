@@ -123,7 +123,9 @@ mod tests {
     #[test]
     fn select_queries_allowed() {
         assert!(is_select_only("SELECT * FROM plugins"));
-        assert!(is_select_only("  SELECT id FROM plugins WHERE enabled = 1  "));
+        assert!(is_select_only(
+            "  SELECT id FROM plugins WHERE enabled = 1  "
+        ));
         assert!(is_select_only("select count(*) from messages"));
         assert!(is_select_only("WITH cte AS (SELECT 1) SELECT * FROM cte"));
         assert!(is_select_only("EXPLAIN SELECT * FROM plugins"));

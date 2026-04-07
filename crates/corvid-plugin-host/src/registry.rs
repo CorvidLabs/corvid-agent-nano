@@ -352,7 +352,10 @@ impl PluginRegistry {
                 .filter(|id| !order.iter().any(|o| o == **id))
                 .copied()
                 .collect();
-            bail!("dependency cycle detected among plugins: [{}]", remaining.join(", "));
+            bail!(
+                "dependency cycle detected among plugins: [{}]",
+                remaining.join(", ")
+            );
         }
 
         Ok(order)
