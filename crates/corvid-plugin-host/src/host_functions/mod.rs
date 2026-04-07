@@ -5,6 +5,8 @@
 //! Functions not linked are never callable — attempts cause a WASM trap.
 
 pub mod algo;
+pub mod db;
+pub mod fs;
 pub mod http;
 pub mod messaging;
 pub mod storage;
@@ -40,10 +42,11 @@ pub fn link_host_functions(
             Capability::AgentMessage { .. } => {
                 messaging::link(linker)?;
             }
-            Capability::DbRead | Capability::FsProjectDir => {
-                // DB and FS host functions are provided through different
-                // mechanisms (direct store access). Linking stubs here for
-                // future expansion.
+            Capability::DbRead => {
+                db::link(linker)?;
+            }
+            Capability::FsProjectDir => {
+                fs::link(linker)?;
             }
             _ => {
                 // Unknown/future capabilities — no host functions to link

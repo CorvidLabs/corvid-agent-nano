@@ -1,6 +1,6 @@
 ---
 module: plugin-sdk
-version: 1
+version: 2
 status: stable
 files:
   - crates/corvid-plugin-sdk/src/lib.rs
@@ -93,6 +93,7 @@ This crate is the **semver stability boundary**. Breaking changes bump `ABI_VERS
 | `event_filter` | `Vec<EventKind>` | Events this plugin subscribes to |
 | `trust_tier` | `TrustTier` | Declared tier (hint — host assigns actual tier) |
 | `min_host_version` | `String` | Minimum compatible host version (semver) |
+| `dependencies` | `Vec<String>` | Plugin IDs this plugin depends on (default: empty) |
 
 ### Capability Variants
 
@@ -167,6 +168,9 @@ All host functions use MessagePack serialization across the WASM boundary. Retur
 10. All serialization across the WASM boundary uses MessagePack (`rmp-serde`)
 11. ABI version is a `u32`, not semver — non-breaking additions keep `ABI_VERSION` unchanged
 12. `ABI_MIN_COMPATIBLE` only moves forward on genuine breaks, maintains a 1-major window
+13. `dependencies` field defaults to empty — backward compatible with manifests without it
+14. Dependency IDs must match the same regex as plugin IDs (`^[a-z][a-z0-9-]{0,49}$`)
+15. A plugin cannot list itself as a dependency
 
 ## Behavioral Examples
 
@@ -230,3 +234,4 @@ None — this is a library crate with no runtime configuration.
 | 2026-03-28 | CorvidAgent | Initial spec from council synthesis (Issue #15) |
 | 2026-04-06 | CorvidAgent | Updated to spec-sync v3.3.0 format — status: active → stable |
 | 2026-03-28 | CorvidAgent | Promoted to active — field types updated to match implementation (String/Vec vs static refs) |
+| 2026-04-06 | CorvidAgent | v2: Added `dependencies` field to PluginManifest for plugin dependency graph support |

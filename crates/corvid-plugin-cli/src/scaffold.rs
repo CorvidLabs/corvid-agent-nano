@@ -129,6 +129,7 @@ impl CorvidPlugin for {struct_name} {{
             event_filter: vec![],
             trust_tier: TrustTier::{tier},
             min_host_version: "0.1.0".into(),
+            dependencies: vec![],
         }}
     }}
 

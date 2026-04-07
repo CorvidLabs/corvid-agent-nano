@@ -11,6 +11,8 @@ use wasmtime::{AsContextMut, Engine, Instance, Linker, Module, Store};
 
 use crate::host_functions;
 use crate::host_functions::algo::AlgoBackend;
+use crate::host_functions::db::DbBackend;
+use crate::host_functions::fs::FsBackend;
 use crate::host_functions::messaging::MessagingBackend;
 use crate::host_functions::storage::StorageBackend;
 use crate::loader::PluginState;
@@ -21,6 +23,8 @@ pub struct InvokeContext {
     pub storage: Arc<StorageBackend>,
     pub algo: Option<Arc<AlgoBackend>>,
     pub messaging: Option<Arc<MessagingBackend>>,
+    pub db: Option<Arc<DbBackend>>,
+    pub fs: Option<Arc<FsBackend>>,
 }
 
 /// Create a WASM Store with all host functions linked for the given plugin.
@@ -57,6 +61,8 @@ fn create_execution_store(
         http_allowlist,
         algo: ctx.algo.as_ref().map(Arc::clone),
         messaging: ctx.messaging.as_ref().map(Arc::clone),
+        db: ctx.db.as_ref().map(Arc::clone),
+        fs: ctx.fs.as_ref().map(Arc::clone),
         message_target_filter,
     };
 
@@ -244,6 +250,8 @@ mod tests {
             storage: Arc::new(StorageBackend::new()),
             algo: None,
             messaging: None,
+            db: None,
+            fs: None,
         };
         assert!(ctx.algo.is_none());
         assert!(ctx.messaging.is_none());

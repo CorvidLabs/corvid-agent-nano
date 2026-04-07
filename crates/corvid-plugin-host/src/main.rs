@@ -370,6 +370,8 @@ async fn handle_invoke(
     let invoke_ctx_storage = Arc::clone(&state.invoke_ctx.storage);
     let invoke_ctx_algo = state.invoke_ctx.algo.as_ref().map(Arc::clone);
     let invoke_ctx_messaging = state.invoke_ctx.messaging.as_ref().map(Arc::clone);
+    let invoke_ctx_db = state.invoke_ctx.db.as_ref().map(Arc::clone);
+    let invoke_ctx_fs = state.invoke_ctx.fs.as_ref().map(Arc::clone);
     let plugin_id_owned = plugin_id.to_string();
     let tool_owned = tool.to_string();
 
@@ -381,6 +383,8 @@ async fn handle_invoke(
             storage: invoke_ctx_storage,
             algo: invoke_ctx_algo,
             messaging: invoke_ctx_messaging,
+            db: invoke_ctx_db,
+            fs: invoke_ctx_fs,
         };
 
         let handle = std::thread::spawn(move || {
@@ -468,6 +472,8 @@ async fn handle_event(
         let ctx_storage = Arc::clone(&state.invoke_ctx.storage);
         let ctx_algo = state.invoke_ctx.algo.as_ref().map(Arc::clone);
         let ctx_messaging = state.invoke_ctx.messaging.as_ref().map(Arc::clone);
+        let ctx_db = state.invoke_ctx.db.as_ref().map(Arc::clone);
+        let ctx_fs = state.invoke_ctx.fs.as_ref().map(Arc::clone);
         let event_clone = event.clone();
 
         let result = tokio::task::spawn_blocking(move || {
@@ -475,6 +481,8 @@ async fn handle_event(
                 storage: ctx_storage,
                 algo: ctx_algo,
                 messaging: ctx_messaging,
+                db: ctx_db,
+                fs: ctx_fs,
             };
             corvid_plugin_host::invoke::dispatch_event_to_plugin(
                 &engine,
@@ -565,6 +573,8 @@ async fn main() -> Result<()> {
         storage: Arc::new(StorageBackend::new()),
         algo: None,      // Set to Some(...) when algod client is configured
         messaging: None, // Set to Some(...) when messaging is configured
+        db: None,        // Set to Some(...) when database is configured
+        fs: None,        // Set to Some(...) when project dir is configured
     };
 
     let state = Arc::new(ServerState {

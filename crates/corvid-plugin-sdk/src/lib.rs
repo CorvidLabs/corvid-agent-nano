@@ -124,6 +124,7 @@ mod tests {
             trust_tier: TrustTier::Verified,
             min_host_version: "0.1.0".into(),
             tools: vec![],
+            dependencies: vec![],
         };
 
         let json = serde_json::to_string(&manifest).unwrap();
@@ -153,6 +154,7 @@ mod tests {
                     "required": ["asset"]
                 }),
             }],
+            dependencies: vec![],
         };
 
         // Verify msgpack roundtrip (same path as WASM manifest extraction)

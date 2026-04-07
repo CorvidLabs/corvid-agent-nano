@@ -70,6 +70,7 @@ pub extern "C" fn __corvid_manifest() -> i32 {
                 }),
             },
         ],
+        dependencies: vec![],
     };
 
     let bytes = rmp_serde::to_vec(&manifest).unwrap();

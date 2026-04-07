@@ -9,6 +9,8 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use wasmtime::{Engine, Instance, Linker, Module, Store};
 
 use crate::host_functions::algo::AlgoBackend;
+use crate::host_functions::db::DbBackend;
+use crate::host_functions::fs::FsBackend;
 use crate::host_functions::messaging::MessagingBackend;
 use crate::host_functions::storage::StorageBackend;
 use crate::sandbox::{MemoryLimiter, SandboxLimits};
@@ -52,6 +54,8 @@ pub struct PluginState {
     pub http_allowlist: Vec<String>,
     pub algo: Option<Arc<AlgoBackend>>,
     pub messaging: Option<Arc<MessagingBackend>>,
+    pub db: Option<Arc<DbBackend>>,
+    pub fs: Option<Arc<FsBackend>>,
     /// Target filter pattern from the AgentMessage capability (glob-style).
     pub message_target_filter: Option<String>,
 }
@@ -96,6 +100,23 @@ pub fn validate_manifest(m: &PluginManifest) -> Result<(), LoadError> {
             host: HOST_VERSION.to_string(),
             required: m.min_host_version.clone(),
         });
+    }
+
+    // Validate dependency IDs
+    let id_re2 = regex::Regex::new(r"^[a-z][a-z0-9-]{0,49}$").unwrap();
+    for dep in &m.dependencies {
+        if !id_re2.is_match(dep) {
+            return Err(LoadError::ManifestInvalid(format!(
+                "dependency ID '{}' does not match ^[a-z][a-z0-9-]{{0,49}}$",
+                dep
+            )));
+        }
+        if dep == &m.id {
+            return Err(LoadError::ManifestInvalid(format!(
+                "plugin '{}' cannot depend on itself",
+                m.id
+            )));
+        }
     }
 
     // Author and description must not be empty
@@ -325,6 +346,8 @@ pub fn load_plugin(
             http_allowlist: Vec::new(),
             algo: None,
             messaging: None,
+            db: None,
+            fs: None,
             message_target_filter: None,
         },
     );
@@ -368,6 +391,7 @@ mod tests {
             trust_tier: TrustTier::Verified,
             min_host_version: "0.1.0".into(),
             tools: vec![],
+            dependencies: vec![],
         };
         assert!(validate_manifest(&m).is_ok());
     }
@@ -384,6 +408,7 @@ mod tests {
             trust_tier: TrustTier::Untrusted,
             min_host_version: "0.1.0".into(),
             tools: vec![],
+            dependencies: vec![],
         };
         let err = validate_manifest(&m).unwrap_err();
         assert!(matches!(err, LoadError::ManifestInvalid(_)));
@@ -401,6 +426,7 @@ mod tests {
             trust_tier: TrustTier::Untrusted,
             min_host_version: "0.1.0".into(),
             tools: vec![],
+            dependencies: vec![],
         };
         let err = validate_manifest(&m).unwrap_err();
         assert!(matches!(err, LoadError::ManifestInvalid(_)));
@@ -418,6 +444,7 @@ mod tests {
             trust_tier: TrustTier::Untrusted,
             min_host_version: "0.1.0".into(),
             tools: vec![],
+            dependencies: vec![],
         };
         let err = validate_manifest(&m).unwrap_err();
         assert!(matches!(err, LoadError::ManifestInvalid(_)));
@@ -584,6 +611,7 @@ mod tests {
             trust_tier: TrustTier::Untrusted,
             min_host_version: "0.1.0".into(),
             tools: vec![],
+            dependencies: vec![],
         }
     }
 }

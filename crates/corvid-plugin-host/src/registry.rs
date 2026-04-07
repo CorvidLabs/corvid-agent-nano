@@ -248,6 +248,118 @@ impl PluginRegistry {
     pub async fn is_empty(&self) -> bool {
         self.slots.read().await.is_empty()
     }
+
+    /// Check whether all dependencies of a plugin are loaded and active.
+    ///
+    /// Returns `Ok(())` if all dependencies are satisfied, or an error
+    /// listing the missing/inactive dependencies.
+    pub async fn check_dependencies(&self, manifest: &PluginManifest) -> Result<()> {
+        let slots = self.slots.read().await;
+        let mut missing = Vec::new();
+        let mut inactive = Vec::new();
+
+        for dep_id in &manifest.dependencies {
+            match slots.get(dep_id) {
+                None => missing.push(dep_id.as_str()),
+                Some(slot) if !slot.is_active() => inactive.push(dep_id.as_str()),
+                _ => {}
+            }
+        }
+
+        if !missing.is_empty() || !inactive.is_empty() {
+            let mut parts = Vec::new();
+            if !missing.is_empty() {
+                parts.push(format!("missing: [{}]", missing.join(", ")));
+            }
+            if !inactive.is_empty() {
+                parts.push(format!("inactive: [{}]", inactive.join(", ")));
+            }
+            bail!(
+                "plugin '{}' has unsatisfied dependencies: {}",
+                manifest.id,
+                parts.join("; ")
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Compute a topological load order for a set of plugin manifests.
+    ///
+    /// Returns plugin IDs in the order they should be loaded (dependencies first).
+    /// Detects cycles and returns an error if one is found.
+    pub fn topological_order(manifests: &[PluginManifest]) -> Result<Vec<String>> {
+        let ids: std::collections::HashSet<&str> =
+            manifests.iter().map(|m| m.id.as_str()).collect();
+
+        // Build adjacency list (plugin -> its dependencies)
+        let mut deps: HashMap<&str, Vec<&str>> = HashMap::new();
+        for m in manifests {
+            let filtered: Vec<&str> = m
+                .dependencies
+                .iter()
+                .filter(|d| ids.contains(d.as_str()))
+                .map(|d| d.as_str())
+                .collect();
+            deps.insert(m.id.as_str(), filtered);
+        }
+
+        // Kahn's algorithm
+        let mut in_degree: HashMap<&str, usize> = ids.iter().map(|&id| (id, 0)).collect();
+        for dep_list in deps.values() {
+            for dep in dep_list {
+                *in_degree.entry(dep).or_insert(0) += 0; // ensure entry exists
+            }
+        }
+        // Count incoming edges: if A depends on B, then A has an incoming edge from B
+        // But for load order, B must come before A, so we count dependencies as in-degree
+        for (id, dep_list) in &deps {
+            // `id` depends on each item in dep_list
+            // So `id` has in_degree = dep_list.len()
+            *in_degree.entry(id).or_insert(0) = dep_list.len();
+        }
+
+        let mut queue: std::collections::VecDeque<&str> = in_degree
+            .iter()
+            .filter(|(_, &deg)| deg == 0)
+            .map(|(&id, _)| id)
+            .collect();
+
+        // Sort the initial queue for deterministic ordering
+        let mut sorted_queue: Vec<&str> = queue.drain(..).collect();
+        sorted_queue.sort();
+        queue.extend(sorted_queue);
+
+        let mut order = Vec::new();
+
+        while let Some(id) = queue.pop_front() {
+            order.push(id.to_string());
+            // Find all plugins that depend on `id` and decrement their in-degree
+            for (dependent, dep_list) in &deps {
+                if dep_list.contains(&id) {
+                    let deg = in_degree.get_mut(dependent).unwrap();
+                    *deg -= 1;
+                    if *deg == 0 {
+                        queue.push_back(dependent);
+                    }
+                }
+            }
+        }
+
+        if order.len() != ids.len() {
+            let remaining: Vec<&str> = ids
+                .iter()
+                .filter(|id| !order.iter().any(|o| o == **id))
+                .copied()
+                .collect();
+            bail!(
+                "dependency cycle detected among plugins: [{}]",
+                remaining.join(", ")
+            );
+        }
+
+        Ok(order)
+    }
 }
 
 impl Default for PluginRegistry {
@@ -314,5 +426,80 @@ mod tests {
         let registry = PluginRegistry::new();
         assert!(registry.is_empty().await);
         assert_eq!(registry.len().await, 0);
+    }
+
+    fn test_manifest(id: &str, deps: Vec<String>) -> PluginManifest {
+        PluginManifest {
+            id: id.into(),
+            version: "1.0.0".into(),
+            author: "corvid".into(),
+            description: "test".into(),
+            capabilities: vec![],
+            event_filter: vec![],
+            trust_tier: corvid_plugin_sdk::TrustTier::Untrusted,
+            min_host_version: "0.1.0".into(),
+            tools: vec![],
+            dependencies: deps,
+        }
+    }
+
+    #[test]
+    fn topological_order_no_deps() {
+        let manifests = vec![
+            test_manifest("alpha", vec![]),
+            test_manifest("beta", vec![]),
+        ];
+        let order = PluginRegistry::topological_order(&manifests).unwrap();
+        assert_eq!(order.len(), 2);
+        // Deterministic alphabetical for no-dep plugins
+        assert_eq!(order[0], "alpha");
+        assert_eq!(order[1], "beta");
+    }
+
+    #[test]
+    fn topological_order_chain() {
+        let manifests = vec![
+            test_manifest("c", vec!["b".into()]),
+            test_manifest("b", vec!["a".into()]),
+            test_manifest("a", vec![]),
+        ];
+        let order = PluginRegistry::topological_order(&manifests).unwrap();
+        assert_eq!(order, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn topological_order_diamond() {
+        let manifests = vec![
+            test_manifest("d", vec!["b".into(), "c".into()]),
+            test_manifest("b", vec!["a".into()]),
+            test_manifest("c", vec!["a".into()]),
+            test_manifest("a", vec![]),
+        ];
+        let order = PluginRegistry::topological_order(&manifests).unwrap();
+        // 'a' must come first, 'd' must come last
+        assert_eq!(order[0], "a");
+        assert_eq!(order[3], "d");
+    }
+
+    #[test]
+    fn topological_order_cycle_detected() {
+        let manifests = vec![
+            test_manifest("a", vec!["b".into()]),
+            test_manifest("b", vec!["a".into()]),
+        ];
+        let result = PluginRegistry::topological_order(&manifests);
+        assert!(result.is_err());
+        assert!(format!("{}", result.unwrap_err()).contains("cycle"));
+    }
+
+    #[test]
+    fn topological_order_external_deps_ignored() {
+        // Dependencies on plugins not in the set are ignored (they may be pre-loaded)
+        let manifests = vec![
+            test_manifest("b", vec!["external".into()]),
+            test_manifest("a", vec![]),
+        ];
+        let order = PluginRegistry::topological_order(&manifests).unwrap();
+        assert_eq!(order.len(), 2);
     }
 }
