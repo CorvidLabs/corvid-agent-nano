@@ -306,7 +306,7 @@ impl PluginRegistry {
 
         // Kahn's algorithm
         let mut in_degree: HashMap<&str, usize> = ids.iter().map(|&id| (id, 0)).collect();
-        for (_, dep_list) in &deps {
+        for dep_list in deps.values() {
             for dep in dep_list {
                 *in_degree.entry(dep).or_insert(0) += 0; // ensure entry exists
             }
