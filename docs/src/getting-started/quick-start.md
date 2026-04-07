@@ -72,3 +72,6 @@ The agent will poll for incoming messages and forward them to the hub (if config
 - [Set up group channels](../guides/group-channels.md) for broadcasting
 - [Run in P2P mode](../guides/p2p-mode.md) without a hub
 - [Install plugins](../guides/plugins.md) to extend capabilities
+- [Build native plugins](../guides/nano-runtime.md) with the event-driven runtime
+- [Write a custom transport](../guides/custom-transport.md) for non-Algorand backends
+- [Examples & demos](../guides/examples.md) for complete walkthroughs
