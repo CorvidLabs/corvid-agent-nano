@@ -17,6 +17,7 @@ use algochat::{AlgoChat, AlgoChatConfig, AlgorandConfig};
 mod agent;
 mod algorand;
 mod bridge;
+mod config;
 mod contacts;
 mod groups;
 mod keystore;
@@ -478,6 +479,30 @@ enum Command {
         /// corvid-agent hub URL
         #[arg(long, default_value = "http://localhost:3578")]
         hub_url: String,
+    },
+
+    /// View or manage the nano.toml configuration file
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum ConfigAction {
+    /// Display the current configuration
+    Show,
+
+    /// Show the config file path
+    Path,
+
+    /// Set a configuration value (e.g. `can config set agent.name my-agent`)
+    Set {
+        /// Config key (dot-separated, e.g. agent.name, hub.url, runtime.poll_interval)
+        key: String,
+
+        /// Value to set
+        value: String,
     },
 }
 
@@ -1398,48 +1423,6 @@ async fn cmd_balance(
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn cmd_balance(
-    network: Network,
-    algod_url: Option<String>,
-    algod_token: Option<String>,
-    seed_hex: Option<String>,
-    address: Option<String>,
-    password: Option<String>,
-    data_dir: &str,
-) -> Result<()> {
-    use algochat::AlgodClient;
-
-    let net = network.defaults();
-    let algod_url = algod_url.unwrap_or(net.algod_url);
-    let algod_token = algod_token.unwrap_or(net.algod_token);
-
-    let (_seed, addr) = load_identity(
-        seed_hex.as_deref(),
-        address.as_deref(),
-        password.as_deref(),
-        data_dir,
-    )?;
-
-    let algod = HttpAlgodClient::new(&algod_url, &algod_token);
-    let info = algod.get_account_info(&addr).await?;
-    let algo = info.amount as f64 / 1_000_000.0;
-    let min_algo = info.min_balance as f64 / 1_000_000.0;
-    let available = algo - min_algo;
-
-    println!("{}", ui::balance(algo));
-    if available < algo {
-        println!(
-            "  {} {:.6} ALGO  {} {:.6} ALGO",
-            "Available:".dimmed(),
-            available,
-            "Min balance:".dimmed(),
-            min_algo,
-        );
-    }
-
-    Ok(())
-}
-
 async fn cmd_status(
     network: Network,
     algod_url: Option<String>,
@@ -2074,21 +2057,388 @@ async fn cmd_plugin(action: PluginAction, data_dir: &str) -> Result<()> {
 }
 
 // ---------------------------------------------------------------------------
+// Config command
+// ---------------------------------------------------------------------------
+
+fn cmd_config(action: ConfigAction, cfg: &config::NanoConfig, data_dir: &str) -> Result<()> {
+    let config_path = std::path::Path::new(data_dir).join("nano.toml");
+
+    match action {
+        ConfigAction::Show => {
+            if !config_path.exists() {
+                ui::warn("No nano.toml found. Run `can setup` or `can config set` to create one.");
+                return Ok(());
+            }
+            let content = std::fs::read_to_string(&config_path)?;
+            println!("{}", content);
+        }
+        ConfigAction::Path => {
+            println!("{}", config_path.display());
+        }
+        ConfigAction::Set { key, value } => {
+            let mut cfg = cfg.clone();
+
+            match key.as_str() {
+                "agent.name" => cfg.agent.name = value,
+                "agent.network" => {
+                    // Validate the network value
+                    match value.as_str() {
+                        "localnet" | "testnet" | "mainnet" => {
+                            cfg.agent.network = Some(value);
+                        }
+                        _ => bail!(
+                            "Invalid network: {}. Use localnet, testnet, or mainnet.",
+                            value
+                        ),
+                    }
+                }
+                "network.algod_url" => cfg.network.algod_url = Some(value),
+                "network.algod_token" => cfg.network.algod_token = Some(value),
+                "network.indexer_url" => cfg.network.indexer_url = Some(value),
+                "network.indexer_token" => cfg.network.indexer_token = Some(value),
+                "hub.url" => cfg.hub.url = value,
+                "hub.disabled" => {
+                    cfg.hub.disabled = value.parse().map_err(|_| {
+                        anyhow::anyhow!("Invalid boolean: {}. Use true or false.", value)
+                    })?;
+                }
+                "runtime.poll_interval" => {
+                    cfg.runtime.poll_interval = value
+                        .parse()
+                        .map_err(|_| anyhow::anyhow!("Invalid number: {}", value))?;
+                }
+                "runtime.no_plugins" => {
+                    cfg.runtime.no_plugins = value.parse().map_err(|_| {
+                        anyhow::anyhow!("Invalid boolean: {}. Use true or false.", value)
+                    })?;
+                }
+                "runtime.health_port" => {
+                    cfg.runtime.health_port = if value == "none" || value == "null" {
+                        None
+                    } else {
+                        Some(
+                            value
+                                .parse()
+                                .map_err(|_| anyhow::anyhow!("Invalid port number: {}", value))?,
+                        )
+                    };
+                }
+                "logging.format" => match value.as_str() {
+                    "text" | "json" => cfg.logging.format = Some(value),
+                    _ => bail!("Invalid log format: {}. Use text or json.", value),
+                },
+                "logging.level" => cfg.logging.level = Some(value),
+                _ => bail!(
+                    "Unknown config key: {}. Valid keys: agent.name, agent.network, \
+                     network.algod_url, network.algod_token, network.indexer_url, \
+                     network.indexer_token, hub.url, hub.disabled, runtime.poll_interval, \
+                     runtime.no_plugins, runtime.health_port, logging.format, logging.level",
+                    key
+                ),
+            }
+
+            std::fs::create_dir_all(data_dir)?;
+            cfg.save(data_dir)?;
+            ui::success(&format!("Set {} in {}", key, config_path.display()));
+        }
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Fund & Register commands (stubs added in v0.2.0, implemented now)
+// ---------------------------------------------------------------------------
+
+#[allow(clippy::too_many_arguments)]
+async fn cmd_fund(
+    network: Network,
+    algod_url: Option<String>,
+    algod_token: Option<String>,
+    address: Option<String>,
+    kmd_url: String,
+    kmd_token: Option<String>,
+    amount: u64,
+    data_dir: &str,
+) -> Result<()> {
+    // Resolve the target address
+    let target_addr = if let Some(addr) = address {
+        addr
+    } else {
+        let ks_path = keystore_path(data_dir);
+        if !keystore::keystore_exists(&ks_path) {
+            bail!("No wallet found. Run `can setup` first, or provide --address.");
+        }
+        let pw = prompt_password("Enter wallet password: ")?;
+        let (_seed, addr) = keystore::load_keystore(&ks_path, &pw)?;
+        addr
+    };
+
+    match network {
+        Network::Localnet => {
+            let net = network.defaults();
+            let algod_url = algod_url.unwrap_or(net.algod_url);
+            let algod_token = algod_token.unwrap_or(net.algod_token);
+            let kmd_token = kmd_token.unwrap_or_else(|| "a".repeat(64));
+
+            ui::field("Target:", &target_addr);
+            ui::field(
+                "Amount:",
+                &format!("{:.6} ALGO", amount as f64 / 1_000_000.0),
+            );
+            ui::field("KMD:", &kmd_url);
+
+            let http = reqwest::Client::new();
+
+            // List wallets
+            let wallets_resp: serde_json::Value = http
+                .get(format!("{}/v1/wallets", kmd_url))
+                .header("X-KMD-API-Token", &kmd_token)
+                .send()
+                .await?
+                .json()
+                .await?;
+
+            let wallets = wallets_resp["wallets"]
+                .as_array()
+                .ok_or_else(|| anyhow::anyhow!("No wallets found in KMD"))?;
+
+            let default_wallet = wallets
+                .iter()
+                .find(|w| w["name"].as_str() == Some("unencrypted-default-wallet"))
+                .ok_or_else(|| anyhow::anyhow!("Default wallet not found in KMD"))?;
+
+            let wallet_id = default_wallet["id"]
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("Wallet ID missing"))?;
+
+            // Init wallet handle
+            let init_resp: serde_json::Value = http
+                .post(format!("{}/v1/wallet/init", kmd_url))
+                .header("X-KMD-API-Token", &kmd_token)
+                .json(&serde_json::json!({
+                    "wallet_id": wallet_id,
+                    "wallet_password": ""
+                }))
+                .send()
+                .await?
+                .json()
+                .await?;
+
+            let wallet_handle = init_resp["wallet_handle_token"]
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("Failed to init wallet handle"))?;
+
+            // List keys to find a funded source account
+            let keys_resp: serde_json::Value = http
+                .post(format!("{}/v1/key/list", kmd_url))
+                .header("X-KMD-API-Token", &kmd_token)
+                .json(&serde_json::json!({
+                    "wallet_handle_token": wallet_handle
+                }))
+                .send()
+                .await?
+                .json()
+                .await?;
+
+            let addresses = keys_resp["addresses"]
+                .as_array()
+                .ok_or_else(|| anyhow::anyhow!("No addresses in default wallet"))?;
+
+            if addresses.is_empty() {
+                bail!("No funded accounts found in KMD default wallet");
+            }
+
+            let funder = addresses[0]
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("Invalid address format"))?;
+
+            // Get suggested params from algod
+            let params_resp: serde_json::Value = http
+                .get(format!("{}/v2/transactions/params", algod_url))
+                .header("X-Algo-API-Token", &algod_token)
+                .send()
+                .await?
+                .json()
+                .await?;
+
+            let last_round = params_resp["last-round"]
+                .as_u64()
+                .ok_or_else(|| anyhow::anyhow!("Missing last-round in params"))?;
+            let genesis_id = params_resp["genesis-id"]
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("Missing genesis-id"))?;
+            let genesis_hash = params_resp["genesis-hash"]
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("Missing genesis-hash"))?;
+            let min_fee = params_resp["min-fee"].as_u64().unwrap_or(1000);
+
+            // Sign transaction via KMD
+            let sign_resp: serde_json::Value = http
+                .post(format!("{}/v1/transaction/sign", kmd_url))
+                .header("X-KMD-API-Token", &kmd_token)
+                .json(&serde_json::json!({
+                    "wallet_handle_token": wallet_handle,
+                    "wallet_password": "",
+                    "transaction": {
+                        "type": "pay",
+                        "from": funder,
+                        "to": target_addr,
+                        "fee": min_fee,
+                        "amount": amount,
+                        "first-round": last_round,
+                        "last-round": last_round + 1000,
+                        "genesis-id": genesis_id,
+                        "genesis-hash": genesis_hash,
+                    }
+                }))
+                .send()
+                .await?
+                .json()
+                .await?;
+
+            let signed_txn = sign_resp["signed_transaction"]
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("Failed to sign transaction: {:?}", sign_resp))?;
+
+            // Decode and submit
+            use base64::Engine;
+            let txn_bytes = base64::engine::general_purpose::STANDARD.decode(signed_txn)?;
+
+            let submit_resp = http
+                .post(format!("{}/v2/transactions", algod_url))
+                .header("X-Algo-API-Token", &algod_token)
+                .header("Content-Type", "application/x-binary")
+                .body(txn_bytes)
+                .send()
+                .await?;
+
+            if submit_resp.status().is_success() {
+                let body: serde_json::Value = submit_resp.json().await?;
+                ui::success(&format!(
+                    "Funded! TxID: {}",
+                    body["txId"].as_str().unwrap_or("unknown")
+                ));
+            } else {
+                let err = submit_resp.text().await?;
+                bail!("Failed to submit funding transaction: {}", err);
+            }
+
+            // Release wallet handle (best-effort)
+            let _ = http
+                .post(format!("{}/v1/wallet/release", kmd_url))
+                .header("X-KMD-API-Token", &kmd_token)
+                .json(&serde_json::json!({
+                    "wallet_handle_token": wallet_handle
+                }))
+                .send()
+                .await;
+        }
+        Network::Testnet => {
+            ui::header("Fund on TestNet");
+            ui::field("Address:", &target_addr);
+            println!();
+            println!("  Visit the Algorand TestNet dispenser to fund your agent:");
+            println!("  {}", "https://bank.testnet.algorand.network".cyan());
+            println!();
+            println!("  Paste your address: {}", target_addr.bright_white());
+        }
+        Network::Mainnet => {
+            ui::header("Fund on MainNet");
+            ui::field("Address:", &target_addr);
+            println!();
+            println!("  Send ALGO to your agent address from any Algorand wallet.");
+            println!("  Address: {}", target_addr.bright_white());
+        }
+    }
+
+    Ok(())
+}
+
+async fn cmd_register(
+    address: Option<String>,
+    name: String,
+    hub_url: String,
+    data_dir: &str,
+) -> Result<()> {
+    // Resolve address
+    let agent_address = if let Some(addr) = address {
+        addr
+    } else {
+        let ks_path = keystore_path(data_dir);
+        if !keystore::keystore_exists(&ks_path) {
+            bail!("No wallet found. Run `can setup` first, or provide --address.");
+        }
+        let pw = prompt_password("Enter wallet password: ")?;
+        let (_seed, addr) = keystore::load_keystore(&ks_path, &pw)?;
+        addr
+    };
+
+    ui::field("Agent:", &name);
+    ui::field("Address:", &agent_address);
+    ui::field("Hub:", &hub_url);
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{}/api/flock/register", hub_url))
+        .json(&serde_json::json!({
+            "name": name,
+            "address": agent_address,
+        }))
+        .send()
+        .await?;
+
+    if resp.status().is_success() {
+        ui::success("Registered with hub!");
+    } else {
+        let status = resp.status();
+        let body = resp.text().await?;
+        bail!("Registration failed ({}): {}", status, body);
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
+
+/// Apply config-file defaults to an Option — CLI/env takes priority, then config, then None.
+fn config_or<T: Clone>(cli_val: Option<T>, cfg_val: Option<&T>) -> Option<T> {
+    cli_val.or_else(|| cfg_val.cloned())
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+    let data_dir = &cli.data_dir;
 
-    let env_filter = if let Some(ref level) = cli.log_level {
+    // Load nano.toml config (missing file → defaults)
+    let cfg = config::NanoConfig::load(data_dir)?;
+
+    // Logging: CLI > config > env > "info"
+    let log_level = cli
+        .log_level
+        .as_deref()
+        .or(cfg.logging.level.as_deref())
+        .map(String::from);
+
+    let env_filter = if let Some(ref level) = log_level {
         tracing_subscriber::EnvFilter::new(level)
     } else {
         tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into())
     };
 
-    match cli.log_format {
+    let log_format = match cfg.logging.format.as_deref() {
+        Some("json") if matches!(cli.log_format, LogFormat::Text) => {
+            // Only use config json if CLI didn't explicitly set something
+            // Since Text is the CLI default, config can override to json
+            LogFormat::Json
+        }
+        _ => cli.log_format,
+    };
+
+    match log_format {
         LogFormat::Json => {
             tracing_subscriber::fmt()
                 .json()
@@ -2099,8 +2449,6 @@ async fn main() -> Result<()> {
             tracing_subscriber::fmt().with_env_filter(env_filter).init();
         }
     }
-
-    let data_dir = &cli.data_dir;
 
     match cli.command {
         Command::Setup {
@@ -2146,19 +2494,19 @@ async fn main() -> Result<()> {
         } => {
             cmd_run(
                 network,
-                algod_url,
-                algod_token,
-                indexer_url,
-                indexer_token,
+                config_or(algod_url, cfg.network.algod_url.as_ref()),
+                config_or(algod_token, cfg.network.algod_token.as_ref()),
+                config_or(indexer_url, cfg.network.indexer_url.as_ref()),
+                config_or(indexer_token, cfg.network.indexer_token.as_ref()),
                 seed,
                 address,
                 password,
                 name,
                 hub_url,
                 poll_interval,
-                no_plugins,
-                no_hub,
-                health_port,
+                no_plugins || cfg.runtime.no_plugins,
+                no_hub || cfg.hub.disabled,
+                health_port.or(cfg.runtime.health_port),
                 data_dir,
             )
             .await
@@ -2182,10 +2530,10 @@ async fn main() -> Result<()> {
                 group,
                 message,
                 network,
-                algod_url,
-                algod_token,
-                indexer_url,
-                indexer_token,
+                config_or(algod_url, cfg.network.algod_url.as_ref()),
+                config_or(algod_token, cfg.network.algod_token.as_ref()),
+                config_or(indexer_url, cfg.network.indexer_url.as_ref()),
+                config_or(indexer_token, cfg.network.indexer_token.as_ref()),
                 seed,
                 address,
                 password,
@@ -2208,8 +2556,8 @@ async fn main() -> Result<()> {
         } => {
             cmd_balance(
                 network,
-                algod_url,
-                algod_token,
+                config_or(algod_url, cfg.network.algod_url.as_ref()),
+                config_or(algod_token, cfg.network.algod_token.as_ref()),
                 seed,
                 address,
                 password,
@@ -2242,10 +2590,10 @@ async fn main() -> Result<()> {
         } => {
             cmd_status(
                 network,
-                algod_url,
-                algod_token,
-                indexer_url,
-                indexer_token,
+                config_or(algod_url, cfg.network.algod_url.as_ref()),
+                config_or(algod_token, cfg.network.algod_token.as_ref()),
+                config_or(indexer_url, cfg.network.indexer_url.as_ref()),
+                config_or(indexer_token, cfg.network.indexer_token.as_ref()),
                 seed,
                 address,
                 password,
@@ -2256,6 +2604,36 @@ async fn main() -> Result<()> {
         }
 
         Command::Plugin { action } => cmd_plugin(action, data_dir).await,
+
+        Command::Config { action } => cmd_config(action, &cfg, data_dir),
+
+        Command::Fund {
+            network,
+            algod_url,
+            algod_token,
+            address,
+            kmd_url,
+            kmd_token,
+            amount,
+        } => {
+            cmd_fund(
+                network,
+                config_or(algod_url, cfg.network.algod_url.as_ref()),
+                config_or(algod_token, cfg.network.algod_token.as_ref()),
+                address,
+                kmd_url,
+                kmd_token,
+                amount,
+                data_dir,
+            )
+            .await
+        }
+
+        Command::Register {
+            address,
+            name,
+            hub_url,
+        } => cmd_register(address, name, hub_url, data_dir).await,
 
         Command::Mcp {
             network,
@@ -2270,10 +2648,10 @@ async fn main() -> Result<()> {
         } => {
             mcp::cmd_mcp(
                 network,
-                algod_url,
-                algod_token,
-                indexer_url,
-                indexer_token,
+                config_or(algod_url, cfg.network.algod_url.as_ref()),
+                config_or(algod_token, cfg.network.algod_token.as_ref()),
+                config_or(indexer_url, cfg.network.indexer_url.as_ref()),
+                config_or(indexer_token, cfg.network.indexer_token.as_ref()),
                 seed,
                 address,
                 password,

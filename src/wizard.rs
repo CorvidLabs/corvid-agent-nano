@@ -103,7 +103,15 @@ pub fn run_wizard(config: WizardConfig) -> Result<WizardResult> {
         ks_path.display()
     ));
 
-    // ── Step 5: Next steps ─────────────────────────────────────────
+    // ── Step 5: Write nano.toml config ────────────────────────────
+    let config_path = data_path.join("nano.toml");
+    if !config_path.exists() {
+        let nano_config = crate::config::NanoConfig::for_new_agent("can", &network.to_string());
+        nano_config.save_to(&config_path)?;
+        ui::success(&format!("Config written to {}", config_path.display()));
+    }
+
+    // ── Step 6: Next steps ─────────────────────────────────────────
     print_next_steps(network, &address);
 
     Ok(WizardResult {
