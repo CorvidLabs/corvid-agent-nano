@@ -1,6 +1,6 @@
 ---
 module: contacts
-version: 1
+version: 2
 status: stable
 files:
   - src/contacts.rs
@@ -27,22 +27,17 @@ PSK (pre-shared key) contact management backed by SQLite. Provides CRUD operatio
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
 | `parse_psk` | `input: &str` | `Result<[u8; 32]>` | Parse a PSK from hex (64 chars) or base64 (44 chars) format |
-
-### ContactStore Methods
-
-| Method | Parameters | Returns | Description |
-|--------|-----------|---------|-------------|
-| `open` | `path: impl AsRef<Path>` | `Result<Self>` | Open or create the contacts SQLite database |
-| `in_memory` | — | `Result<Self>` | Create an in-memory contacts database for testing |
-| `add` | `name: &str`, `address: &str`, `psk: &[u8]` | `Result<()>` | Add a new contact; errors if name already exists |
-| `upsert` | `name: &str`, `address: &str`, `psk: &[u8]` | `Result<()>` | Add or overwrite a contact (INSERT OR REPLACE) |
-| `remove` | `name: &str` | `Result<bool>` | Remove a contact by name; returns true if deleted, false if not found |
-| `list` | — | `Result<Vec<Contact>>` | List all contacts ordered by name |
-| `get` | `name: &str` | `Result<Option<Contact>>` | Get a contact by name |
-| `get_by_address` | `address: &str` | `Result<Option<Contact>>` | Get a contact by Algorand address |
-| `export_json` | — | `Result<String>` | Export all contacts as pretty-printed JSON (PSK as hex) |
-| `import_json` | `json: &str` | `Result<usize>` | Import contacts from JSON (merges via upsert); returns count imported |
-| `count` | — | `Result<usize>` | Count the number of stored contacts |
+| `open` | `path: impl AsRef<Path>` | `Result<ContactStore>` | Open or create the contacts SQLite database |
+| `in_memory` | — | `Result<ContactStore>` | Create an in-memory contacts database for testing |
+| `add` | `&ContactStore`, `name: &str`, `address: &str`, `psk: &[u8]` | `Result<()>` | Add a new contact; errors if name already exists |
+| `upsert` | `&ContactStore`, `name: &str`, `address: &str`, `psk: &[u8]` | `Result<()>` | Add or overwrite a contact (INSERT OR REPLACE) |
+| `remove` | `&ContactStore`, `name: &str` | `Result<bool>` | Remove a contact by name; returns true if deleted, false if not found |
+| `list` | `&ContactStore` | `Result<Vec<Contact>>` | List all contacts ordered by name |
+| `get` | `&ContactStore`, `name: &str` | `Result<Option<Contact>>` | Get a contact by name |
+| `get_by_address` | `&ContactStore`, `address: &str` | `Result<Option<Contact>>` | Get a contact by Algorand address |
+| `export_json` | `&ContactStore` | `Result<String>` | Export all contacts as pretty-printed JSON (PSK as hex) |
+| `import_json` | `&ContactStore`, `json: &str` | `Result<usize>` | Import contacts from JSON (merges via upsert); returns count imported |
+| `count` | `&ContactStore` | `Result<usize>` | Count the number of stored contacts |
 
 ### Contact Fields
 
