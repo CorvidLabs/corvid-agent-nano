@@ -23,16 +23,22 @@ This is the **only TypeScript code** needed to integrate the entire Rust plugin 
 
 | Interface | File | Description |
 |-----------|------|-------------|
-| `PluginManifest` | `rust-bridge.ts` | Plugin metadata including id, version, author, description, capabilities, trust tier, and tools |
-| `ToolInfo` | `rust-bridge.ts` | Plugin tool definition with name, description, and JSON Schema input specification |
-| `HealthStatus` | `rust-bridge.ts` | Plugin host health status including connection state, per-plugin status, and uptime |
-| `PluginEvent` | `rust-bridge.ts` | Event dispatched to plugins with type, optional pluginId, and payload |
+| `PluginManifest` | `rust-bridge.ts` | Plugin metadata: id, version, author, description, capabilities, trust tier, and available tools |
+| `ToolInfo` | `rust-bridge.ts` | Tool definition: name, description, and JSON Schema v7 input schema |
+| `HealthStatus` | `rust-bridge.ts` | Plugin host health status: connected flag, per-plugin state, and uptime |
+| `PluginEvent` | `rust-bridge.ts` | Event dispatched to plugins: type, timestamp, and payload |
 
 ### Exported Classes
 
 | Class | File | Description |
 |-------|------|-------------|
 | `PluginBridge` | `rust-bridge.ts` | Unix socket client — JSON-RPC dispatch, tool invocation, event forwarding |
+
+### Exported Functions
+
+| Function | File | Parameters | Returns | Description |
+|----------|------|-----------|---------|-------------|
+| `registerPluginRoutes` | `plugins.ts` | `(app: BunServe, bridge: PluginBridge)` | `void` | Register `/api/plugins` and tool invocation REST endpoints |
 
 ### PluginBridge Methods
 

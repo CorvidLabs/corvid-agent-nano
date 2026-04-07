@@ -21,7 +21,7 @@ Agent message loop and SQLite-backed persistent storage. The agent module polls 
 
 | Struct | Description |
 |--------|-------------|
-| `AgentLoopConfig` | Configuration for the agent message loop: poll interval, hub URL, agent name/address, signing key |
+| `AgentLoopConfig` | Configuration for the agent message loop: poll interval, hub URL, agent name, agent address, signing key |
 | `SqliteKeyStorage` | Persistent X25519 private key storage backed by SQLite |
 | `SqliteMessageCache` | Persistent message cache and sync-round bookmarks backed by SQLite |
 
@@ -31,10 +31,12 @@ Agent message loop and SQLite-backed persistent storage. The agent module polls 
 |----------|-----------|---------|-------------|
 | `run_message_loop` | `client: Arc<AlgoChat<A,I,S,M>>`, `algod: Arc<A>`, `config: AgentLoopConfig` | `()` (runs forever) | Polls for AlgoChat messages, forwards to hub, sends encrypted replies on-chain |
 | `send_reply` | `client`, `algod`, `sender_address`, `recipient_address`, `message`, `signing_key` | `anyhow::Result<String>` | Encrypt a message (PSK or X25519) and send it on-chain, returns txid |
-| `open` | `path: impl AsRef<Path>` | `algochat::Result<Self>` | Open or create a SQLite database at the given file path (on both `SqliteKeyStorage` and `SqliteMessageCache`) |
-| `in_memory` | — | `algochat::Result<Self>` | Create an in-memory database for testing (on both `SqliteKeyStorage` and `SqliteMessageCache`) |
+| `open` | `path: impl AsRef<Path>` | `algochat::Result<Self>` | Open or create a SQLite database (method on both `SqliteKeyStorage` and `SqliteMessageCache`) |
+| `in_memory` | — | `algochat::Result<Self>` | Create an in-memory database for testing (method on both `SqliteKeyStorage` and `SqliteMessageCache`) |
 
-### AgentLoopConfig Fields
+### Struct Methods
+
+#### AgentLoopConfig Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -43,6 +45,21 @@ Agent message loop and SQLite-backed persistent storage. The agent module polls 
 | `agent_name` | `String` | Agent display name |
 | `agent_address` | `String` | Agent's Algorand address (for sending replies) |
 | `signing_key` | `SigningKey` | Ed25519 signing key (for signing reply transactions) |
+
+#### SqliteKeyStorage Methods
+
+| Method | Parameters | Returns | Description |
+|--------|-----------|---------|-------------|
+| `open` | `path: impl AsRef<Path>` | `algochat::Result<Self>` | Open or create a SQLite database at the given file path |
+| `in_memory` | — | `algochat::Result<Self>` | Create an in-memory database for testing |
+
+#### SqliteMessageCache Methods
+
+| Method | Parameters | Returns | Description |
+|--------|-----------|---------|-------------|
+| `open` | `path: impl AsRef<Path>` | `algochat::Result<Self>` | Open or create a SQLite database at the given file path |
+| `in_memory` | — | `algochat::Result<Self>` | Create an in-memory database for testing |
+
 
 ### SQLite Storage (storage.rs)
 
@@ -99,6 +116,7 @@ Agent message loop and SQLite-backed persistent storage. The agent module polls 
 
 ## Invariants
 
+<<<<<<< HEAD
 1. `SqliteKeyStorage` and `SqliteMessageCache` use `Mutex<Connection>` for thread safety — safe to share across async tasks
 2. Message deduplication is enforced by `INSERT OR IGNORE` on the transaction ID primary key
 3. Key overwrites are allowed via `INSERT OR REPLACE` — storing a key for an existing address replaces it
@@ -127,6 +145,30 @@ Agent message loop and SQLite-backed persistent storage. The agent module polls 
 - **When** the process exits and a new `SqliteMessageCache` is opened at the same path
 - **Then** `retrieve("alice", None)` returns the previously stored messages
 - **And** `get_last_sync_round("alice")` returns `Some(500)`
+=======
+1. `AgentLoopConfig::signing_key` must be a valid 32-byte Ed25519 key
+2. `AgentLoopConfig::agent_address` must be a valid Algorand address
+3. `AgentLoopConfig::poll_interval_secs` must be greater than 0
+4. `SqliteKeyStorage` and `SqliteMessageCache` use `Mutex<Connection>` for thread safety — safe to share across async tasks
+5. Message deduplication is enforced by `INSERT OR IGNORE` on the transaction ID primary key
+6. Key overwrites are allowed via `INSERT OR REPLACE` — storing a key for an existing address replaces it
+7. Database tables are created on open (`CREATE TABLE IF NOT EXISTS`) — no separate migration step needed
+8. Keys are stored as raw bytes (not encrypted at rest — use full-disk encryption for data at rest)
+
+## Behavioral Examples
+
+### Scenario: Persistent key storage survives restart
+
+- **Given** `SqliteKeyStorage` opened at `data/keys.db` with a 32-byte private key stored for address "AAAA..."
+- **When** the process exits and a new `SqliteKeyStorage` is opened at the same path
+- **Then** `retrieve("AAAA...")` returns the same 32-byte key
+
+### Scenario: Key overwrite via INSERT OR REPLACE
+
+- **Given** a `SqliteKeyStorage` with key K1 stored for address "AAAA..."
+- **When** `store(&K2, "AAAA...")` is called with a different key
+- **Then** `retrieve("AAAA...")` returns K2, replacing K1
+>>>>>>> e28778f (docs: sync API documentation with actual exports - fix file paths and update Public API sections)
 
 ### Scenario: Message deduplication across stores
 
@@ -134,16 +176,28 @@ Agent message loop and SQLite-backed persistent storage. The agent module polls 
 - **When** `store([msg_with_id_tx1], "alice")` is called again
 - **Then** no duplicate is created; `retrieve("alice", None)` still returns exactly 1 message
 
+### Scenario: AgentLoopConfig with defaults
+
+- **Given** CLI defaults
+- **When** an `AgentLoopConfig` is constructed
+- **Then** `poll_interval_secs` is 5, `hub_url` is `Some("http://localhost:3578")`, `agent_name` is `"can"`
+
 ## Error Cases
 
 | Condition | Behavior |
 |-----------|----------|
+<<<<<<< HEAD
 | Hub unreachable during message loop | Sends `[error] Agent hub is unreachable` reply on-chain, continues polling |
 | Hub task times out or fails | Sends `[error] Agent did not produce a response` reply on-chain, continues polling |
 | No PSK contact and no X25519 key found for recipient | `send_reply` returns `Err` ("No encryption key found for {address}") |
+=======
+>>>>>>> e28778f (docs: sync API documentation with actual exports - fix file paths and update Public API sections)
 | SQLite database file cannot be opened | `SqliteKeyStorage::open` / `SqliteMessageCache::open` returns `AlgoChatError::StorageFailed` |
+| Database mutex is poisoned | Lock returns `AlgoChatError::StorageFailed("Database lock poisoned")` |
 | Key not found in SQLite storage | `retrieve()` returns `AlgoChatError::KeyNotFound(address)` |
 | Corrupt key blob (wrong length) | `retrieve()` returns `AlgoChatError::StorageFailed("Invalid key length")` |
+| Invalid `AgentLoopConfig::signing_key` | Upstream code fails during transaction signing |
+| Invalid `AgentLoopConfig::agent_address` | Upstream code fails during message processing |
 
 ## Dependencies
 
@@ -151,6 +205,7 @@ Agent message loop and SQLite-backed persistent storage. The agent module polls 
 
 | Module | What is used |
 |--------|-------------|
+<<<<<<< HEAD
 | `algochat` (external, git: rs-algochat) | `AlgoChat`, `AlgodClient`, `IndexerClient`, `EncryptionKeyStorage`, `MessageCache`, `Message` types and traits |
 | `ed25519_dalek` | `SigningKey` for signing Algorand transactions |
 | `serde` | `Serialize`, `Deserialize` derive macros |
@@ -158,12 +213,26 @@ Agent message loop and SQLite-backed persistent storage. The agent module polls 
 | `rusqlite` | SQLite database access for persistent storage |
 | `async-trait` | Async trait implementations for storage traits |
 | `anyhow` | Error handling in `send_reply` |
+=======
+| `algochat` (external, git: rs-algochat) | `AlgoChat`, `AlgodClient`, `IndexerClient`, `EncryptionKeyStorage`, `MessageCache`, `Message` traits and types |
+| `ed25519_dalek` | `SigningKey` for agent transaction signing |
+| `reqwest` | HTTP client for hub communication |
+| `serde` | `Serialize`, `Deserialize` for JSON payloads |
+| `rusqlite` | SQLite database access for persistent storage |
+| `async-trait` | Async trait implementations for storage traits |
+| `tracing` | Logging and debugging |
+>>>>>>> e28778f (docs: sync API documentation with actual exports - fix file paths and update Public API sections)
 
 ### Consumed By
 
 | Module | What is used |
 |--------|-------------|
+<<<<<<< HEAD
 | `src/main.rs` | `AgentLoopConfig`, `run_message_loop` for agent startup; `SqliteKeyStorage`, `SqliteMessageCache` for persistence |
+=======
+| `src/main.rs` | `AgentLoopConfig`, `run_message_loop`, `SqliteKeyStorage`, `SqliteMessageCache` |
+| `src/algorand.rs` | `AlgodClient` and `IndexerClient` trait implementation |
+>>>>>>> e28778f (docs: sync API documentation with actual exports - fix file paths and update Public API sections)
 
 ## Change Log
 
@@ -172,5 +241,10 @@ Agent message loop and SQLite-backed persistent storage. The agent module polls 
 | 2026-03-28 | CorvidAgent | Initial spec |
 | 2026-03-28 | CorvidAgent | Replace local crypto/algochat crates with external rs-algochat dependency |
 | 2026-03-28 | CorvidAgent | Add SQLite storage module: SqliteKeyStorage + SqliteMessageCache with 16 tests |
+<<<<<<< HEAD
 | 2026-03-28 | CorvidAgent | Add Exported Modules/Functions sections for spec-sync strict compliance |
 | 2026-03-30 | CorvidAgent | Rewrite spec to match current source: remove old types (AgentIdentity, Message, NanoConfig), add AgentLoopConfig, run_message_loop, send_reply |
+=======
+| 2026-04-06 | Magpie | Update file paths to match actual codebase (src/agent.rs, src/storage.rs) |
+| 2026-04-06 | Magpie | Refactor Public API to document only actual exports: AgentLoopConfig, run_message_loop, SqliteKeyStorage, SqliteMessageCache |
+>>>>>>> e28778f (docs: sync API documentation with actual exports - fix file paths and update Public API sections)
