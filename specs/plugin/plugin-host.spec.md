@@ -1,6 +1,6 @@
 ---
 module: plugin-host
-version: 1
+version: 2
 status: stable
 files:
   - crates/corvid-plugin-host/src/main.rs
@@ -14,6 +14,8 @@ files:
   - crates/corvid-plugin-host/src/host_functions/storage.rs
   - crates/corvid-plugin-host/src/host_functions/algo.rs
   - crates/corvid-plugin-host/src/host_functions/http.rs
+  - crates/corvid-plugin-host/src/host_functions/db.rs
+  - crates/corvid-plugin-host/src/host_functions/fs.rs
   - crates/corvid-plugin-host/src/wasm_mem.rs
   - crates/corvid-plugin-host/src/invoke.rs
 depends_on:
@@ -66,6 +68,8 @@ The Rust sidecar binary that hosts WASM plugins for corvid-agent. Runs as a sepa
 | `InvokeContext` | `invoke.rs` | Shared backends for plugin tool invocations and event dispatch |
 | `AlgoBackend` | `host_functions/algo.rs` | Pluggable Algorand state query backend |
 | `MessagingBackend` | `host_functions/messaging.rs` | Pluggable agent message dispatch backend |
+| `DbBackend` | `host_functions/db.rs` | Pluggable read-only database query backend |
+| `FsBackend` | `host_functions/fs.rs` | Pluggable sandboxed filesystem read backend |
 
 ## Modules
 
@@ -197,6 +201,8 @@ Host function linking is implemented — capabilities are gated at instantiation
 | `storage.rs` | `Storage` | **Implemented** | Scoped key-value store per plugin namespace (in-memory) |
 | `algo.rs` | `AlgoRead` | **Implemented** | Read Algorand application state via pluggable `AlgoBackend` (trait-based for testability) |
 | `messaging.rs` | `AgentMessage` | **Implemented** | Send messages to agents via pluggable `MessagingBackend` with `target_filter` enforcement |
+| `db.rs` | `DbRead` | **Implemented** | Read-only SQL queries via pluggable `DbBackend` with SELECT-only validation |
+| `fs.rs` | `FsProjectDir` | **Implemented** | Sandboxed read-only file access via pluggable `FsBackend` with path traversal protection |
 
 ## Invariants
 
@@ -210,10 +216,13 @@ Host function linking is implemented — capabilities are gated at instantiation
 8. Per-plugin KV namespace isolation is enforced by construction (namespace prefix on all keys)
 9. AOT cache is keyed by `(wasm_hash, compiler_version, cpu_features)` — no stale cache hits
 10. Ed25519 signature verification happens BEFORE manifest extraction for Trusted tier — verifies detached `.sig` file and checks public key against `{data_dir}/trusted-keys/` registry
-11. SQL queries from `DbRead` capability will be parsed and rejected if not SELECT-only — **not yet implemented** (no `db.rs` host function)
+11. SQL queries from `DbRead` capability are validated SELECT-only before execution — non-SELECT statements are rejected. Multiple statements (semicolons) are also rejected
 12. Native plugin loading (dlopen) is planned for `--features dev-mode` — **not yet implemented**
 13. Panics in plugins are caught at the Wasmtime boundary — never propagate to the host process
 14. The socket path is `{data_dir}/plugins.sock` — configurable via `--data-dir`
+15. `FsProjectDir` paths are canonicalized and validated against the project root — symlinks resolved, traversal blocked
+16. Plugin dependencies are validated at manifest time (format + no self-dependency) and checked at registration time (all deps must be loaded and active)
+17. `PluginRegistry::topological_order()` detects dependency cycles via Kahn's algorithm — cyclic plugin sets cause a hard load failure
 
 ## Behavioral Examples
 
@@ -312,3 +321,4 @@ Host function linking is implemented — capabilities are gated at instantiation
 | 2026-03-28 | CorvidAgent | Phase A data plane: WASM memory access layer (`wasm_mem.rs`), real `host_kv_get`/`host_kv_set` with namespace isolation, real `host_http_get`/`host_http_post` via `ureq` with SSRF+allowlist validation |
 | 2026-04-06 | CorvidAgent | Updated to spec-sync v3.3.0 format — status: active → stable |
 | 2026-03-28 | CorvidAgent | Phase B data plane: `host_algo_state` with pluggable `AlgoBackend`, `host_send_message` with `MessagingBackend` + target_filter enforcement, `plugin.invoke` RPC via `__corvid_invoke` WASM export, `plugin.event` RPC via `__corvid_on_event`, `invoke.rs` execution module |
+| 2026-04-06 | CorvidAgent | v2: Implemented `host_db_query` (SELECT-only SQL with pluggable `DbBackend`), `host_fs_read` (sandboxed file read with `FsBackend` + path traversal protection), plugin dependency graph (topological sort, cycle detection, dependency checking at registration) |

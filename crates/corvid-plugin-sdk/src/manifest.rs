@@ -62,4 +62,10 @@ pub struct PluginManifest {
     /// TypeScript tool registry without calling into the WASM instance.
     #[serde(default)]
     pub tools: Vec<ToolInfo>,
+
+    /// Plugin IDs this plugin depends on. The host ensures dependencies
+    /// are loaded and active before initializing this plugin.
+    /// Each entry is a plugin ID (e.g. `"algo-oracle"`).
+    #[serde(default)]
+    pub dependencies: Vec<String>,
 }
