@@ -357,6 +357,52 @@ enum Command {
         action: PluginAction,
     },
 
+    /// Fund your agent from the localnet KMD faucet (or show instructions for testnet/mainnet)
+    Fund {
+        /// Algorand network preset
+        #[arg(long, default_value = "localnet", env = "CAN_NETWORK")]
+        network: Network,
+
+        /// Override: Algorand node URL
+        #[arg(long, env = "CAN_ALGOD_URL")]
+        algod_url: Option<String>,
+
+        /// Override: Algorand node token
+        #[arg(long, env = "CAN_ALGOD_TOKEN")]
+        algod_token: Option<String>,
+
+        /// Target address (defaults to keystore address)
+        #[arg(long)]
+        address: Option<String>,
+
+        /// KMD endpoint URL (localnet only)
+        #[arg(long, default_value = "http://localhost:4002")]
+        kmd_url: String,
+
+        /// KMD API token
+        #[arg(long)]
+        kmd_token: Option<String>,
+
+        /// Amount in microAlgos (default: 10 ALGO = 10_000_000)
+        #[arg(long, default_value = "10000000")]
+        amount: u64,
+    },
+
+    /// Register your agent with the corvid-agent hub
+    Register {
+        /// Agent Algorand address (defaults to keystore address)
+        #[arg(long)]
+        address: Option<String>,
+
+        /// Display name for this agent
+        #[arg(long)]
+        name: String,
+
+        /// Hub URL
+        #[arg(long, default_value = "http://localhost:3578")]
+        hub_url: String,
+    },
+
     /// Start an MCP server over stdio (for Claude Code / AI agent integration)
     Mcp {
         /// Algorand network preset
