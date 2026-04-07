@@ -1,6 +1,6 @@
 //! Corvid Agent CAN — lightweight Rust AlgoChat agent.
 //!
-//! Subcommands: setup (init), import, run, send, inbox, history, balance, status, contacts, groups, change-password, info, fund, register, mcp, plugin
+//! Subcommands: setup (init), import, run, send, inbox, history, balance, status, contacts, groups, change-password, info, fund, register, mcp, plugin, discover, scan
 
 use std::fmt;
 use std::sync::Arc;
@@ -490,6 +490,52 @@ enum Command {
     Config {
         #[command(subcommand)]
         action: ConfigAction,
+    },
+
+    /// Discover all agents on the Algorand chain (no hub needed)
+    Discover {
+        /// Algorand network preset
+        #[arg(long, default_value = "localnet", env = "CAN_NETWORK")]
+        network: Network,
+
+        /// Override: Algorand indexer URL
+        #[arg(long, env = "CAN_INDEXER_URL")]
+        indexer_url: Option<String>,
+
+        /// Override: Algorand indexer token
+        #[arg(long, env = "CAN_INDEXER_TOKEN")]
+        indexer_token: Option<String>,
+
+        /// Only show agents active after this round
+        #[arg(long)]
+        after_round: Option<u64>,
+
+        /// Maximum transactions to scan (default: 500)
+        #[arg(long)]
+        limit: Option<u32>,
+    },
+
+    /// Scan all AlgoChat activity on the chain (no hub needed)
+    Scan {
+        /// Algorand network preset
+        #[arg(long, default_value = "localnet", env = "CAN_NETWORK")]
+        network: Network,
+
+        /// Override: Algorand indexer URL
+        #[arg(long, env = "CAN_INDEXER_URL")]
+        indexer_url: Option<String>,
+
+        /// Override: Algorand indexer token
+        #[arg(long, env = "CAN_INDEXER_TOKEN")]
+        indexer_token: Option<String>,
+
+        /// Only show messages after this round
+        #[arg(long)]
+        after_round: Option<u64>,
+
+        /// Maximum transactions to show (default: 50)
+        #[arg(long, default_value = "50")]
+        limit: u32,
     },
 }
 
@@ -2487,6 +2533,189 @@ async fn cmd_register(
 // Main
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Discover & Scan — hub-independent chain inspection
+// ---------------------------------------------------------------------------
+
+async fn cmd_discover(
+    network: Network,
+    indexer_url: Option<String>,
+    indexer_token: Option<String>,
+    after_round: Option<u64>,
+    limit: Option<u32>,
+    contacts: Option<&ContactStore>,
+) -> Result<()> {
+    let net = network.defaults();
+    let indexer_url = indexer_url.unwrap_or(net.indexer_url);
+    let indexer_token = indexer_token.unwrap_or(net.indexer_token);
+
+    ui::header("Corvid Agent CAN — Discover Agents");
+    ui::field("Network:", &network.to_string());
+    ui::field("Indexer:", &indexer_url);
+    println!();
+
+    let indexer = HttpIndexerClient::new(&indexer_url, &indexer_token);
+    let agents = indexer.discover_agents(after_round, limit).await?;
+
+    if agents.is_empty() {
+        ui::warn("No AlgoChat activity found on this network.");
+        return Ok(());
+    }
+
+    println!(
+        "  {} agents found across {} scanned transactions\n",
+        agents.len().to_string().green().bold(),
+        limit.unwrap_or(500).to_string().dimmed()
+    );
+
+    // Table header
+    println!(
+        "  {:<12} {:<10} {:<10} {:<12} {}",
+        "SENT".bold(),
+        "RECV".bold(),
+        "LAST ROUND".bold(),
+        "LAST SEEN".bold(),
+        "ADDRESS".bold(),
+    );
+    ui::separator(80);
+
+    for agent in &agents {
+        let name = contacts.and_then(|cs| {
+            cs.list().ok().and_then(|list| {
+                list.iter()
+                    .find(|c| c.address == agent.address)
+                    .map(|c| c.name.clone())
+            })
+        });
+
+        let ts = chrono::DateTime::from_timestamp(agent.last_seen_time as i64, 0)
+            .map(|dt| dt.format("%m-%d %H:%M").to_string())
+            .unwrap_or_else(|| "unknown".into());
+
+        let addr_display = if let Some(ref n) = name {
+            format!("{} ({})", n.cyan(), &agent.address[..8])
+        } else {
+            format!(
+                "{}...{}",
+                &agent.address[..8],
+                &agent.address[agent.address.len() - 6..]
+            )
+        };
+
+        println!(
+            "  {:<12} {:<10} {:<12} {:<12} {}",
+            agent.sent,
+            agent.received,
+            agent.last_seen_round,
+            ts.dimmed(),
+            addr_display,
+        );
+    }
+
+    println!();
+    Ok(())
+}
+
+async fn cmd_scan(
+    network: Network,
+    indexer_url: Option<String>,
+    indexer_token: Option<String>,
+    after_round: Option<u64>,
+    limit: u32,
+    contacts: Option<&ContactStore>,
+) -> Result<()> {
+    let net = network.defaults();
+    let indexer_url = indexer_url.unwrap_or(net.indexer_url);
+    let indexer_token = indexer_token.unwrap_or(net.indexer_token);
+
+    ui::header("Corvid Agent CAN — Chain Activity Scanner");
+    ui::field("Network:", &network.to_string());
+    ui::field("Indexer:", &indexer_url);
+    println!();
+
+    let indexer = HttpIndexerClient::new(&indexer_url, &indexer_token);
+    let messages = indexer.scan_all_algochat(after_round, Some(limit)).await?;
+
+    if messages.is_empty() {
+        ui::warn("No AlgoChat messages found on this network.");
+        return Ok(());
+    }
+
+    println!(
+        "  {} messages found\n",
+        messages.len().to_string().green().bold()
+    );
+
+    let resolve_name = |addr: &str| -> String {
+        contacts
+            .and_then(|cs| {
+                cs.list().ok().and_then(|list| {
+                    list.iter()
+                        .find(|c| c.address == addr)
+                        .map(|c| c.name.clone())
+                })
+            })
+            .unwrap_or_else(|| {
+                if addr.len() >= 14 {
+                    format!("{}...{}", &addr[..8], &addr[addr.len() - 6..])
+                } else {
+                    addr.to_string()
+                }
+            })
+    };
+
+    // Table header
+    println!(
+        "  {:<12} {:<14} {:<20} {:<20} {:<8} {}",
+        "ROUND".bold(),
+        "TIME".bold(),
+        "FROM".bold(),
+        "TO".bold(),
+        "BYTES".bold(),
+        "TXID".bold(),
+    );
+    ui::separator(95);
+
+    for msg in &messages {
+        let ts = chrono::DateTime::from_timestamp(msg.round_time as i64, 0)
+            .map(|dt| dt.format("%m-%d %H:%M:%S").to_string())
+            .unwrap_or_else(|| "unknown".into());
+
+        let from = resolve_name(&msg.sender);
+        let to = resolve_name(&msg.receiver);
+
+        println!(
+            "  {:<12} {:<14} {:<20} {:<20} {:<8} {}",
+            msg.confirmed_round,
+            ts.dimmed(),
+            from.cyan(),
+            to.green(),
+            msg.note_len,
+            &msg.txid[..12],
+        );
+    }
+
+    println!();
+    // Summary: unique conversations
+    let mut pairs: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+    for msg in &messages {
+        let (a, b) = if msg.sender < msg.receiver {
+            (msg.sender.clone(), msg.receiver.clone())
+        } else {
+            (msg.receiver.clone(), msg.sender.clone())
+        };
+        pairs.insert((a, b));
+    }
+    println!(
+        "  {} unique conversations across {} messages",
+        pairs.len().to_string().bold(),
+        messages.len().to_string().bold()
+    );
+    println!();
+
+    Ok(())
+}
+
 /// Apply config-file defaults to an Option — CLI/env takes priority, then config, then None.
 fn config_or<T: Clone>(cli_val: Option<T>, cfg_val: Option<&T>) -> Option<T> {
     cli_val.or_else(|| cfg_val.cloned())
@@ -2743,6 +2972,58 @@ async fn main() -> Result<()> {
                 password,
                 hub_url,
                 data_dir,
+            )
+            .await
+        }
+
+        Command::Discover {
+            network,
+            indexer_url,
+            indexer_token,
+            after_round,
+            limit,
+        } => {
+            let contacts = {
+                let path = contacts_db_path(data_dir);
+                if path.exists() {
+                    ContactStore::open(&path).ok()
+                } else {
+                    None
+                }
+            };
+            cmd_discover(
+                network,
+                config_or(indexer_url, cfg.network.indexer_url.as_ref()),
+                config_or(indexer_token, cfg.network.indexer_token.as_ref()),
+                after_round,
+                limit,
+                contacts.as_ref(),
+            )
+            .await
+        }
+
+        Command::Scan {
+            network,
+            indexer_url,
+            indexer_token,
+            after_round,
+            limit,
+        } => {
+            let contacts = {
+                let path = contacts_db_path(data_dir);
+                if path.exists() {
+                    ContactStore::open(&path).ok()
+                } else {
+                    None
+                }
+            };
+            cmd_scan(
+                network,
+                config_or(indexer_url, cfg.network.indexer_url.as_ref()),
+                config_or(indexer_token, cfg.network.indexer_token.as_ref()),
+                after_round,
+                limit,
+                contacts.as_ref(),
             )
             .await
         }
