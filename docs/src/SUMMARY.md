@@ -36,6 +36,9 @@
 - [P2P Mode](./guides/p2p-mode.md)
 - [Plugins (WASM)](./guides/plugins.md)
 - [Plugin Development](./guides/plugin-development.md)
+- [Nano Runtime (Native Plugins)](./guides/nano-runtime.md)
+- [Custom Transport](./guides/custom-transport.md)
+- [Examples & Demos](./guides/examples.md)
 - [MCP Integration](./guides/mcp-integration.md)
 - [Demo Walkthrough](./guides/demo-walkthrough.md)
 
