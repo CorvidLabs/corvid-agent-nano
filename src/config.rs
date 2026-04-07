@@ -175,6 +175,15 @@ impl NanoConfig {
         Ok(())
     }
 
+    /// Get a plugin's config table from `[plugins.<name>]`.
+    pub fn plugin_config(&self, name: &str) -> Option<toml::Table> {
+        self.plugins
+            .plugin_configs
+            .get(name)
+            .and_then(|v| v.as_table())
+            .cloned()
+    }
+
     /// Generate a config file for a newly set up agent.
     pub fn for_new_agent(name: &str, network: &str) -> Self {
         Self {

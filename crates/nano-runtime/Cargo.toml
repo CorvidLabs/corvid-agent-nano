@@ -1,0 +1,21 @@
+[package]
+name = "nano-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Event-driven plugin runtime for corvid-agent-nano"
+
+[dependencies]
+nano-transport = { path = "../nano-transport" }
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+toml.workspace = true
+reqwest.workspace = true
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }

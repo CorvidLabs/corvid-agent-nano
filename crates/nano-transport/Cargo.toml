@@ -1,0 +1,18 @@
+[package]
+name = "nano-transport"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Transport abstraction layer for corvid-agent-nano messaging"
+
+[dependencies]
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }

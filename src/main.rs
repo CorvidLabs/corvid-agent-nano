@@ -15,6 +15,7 @@ use zeroize::Zeroize;
 use algochat::{AlgoChat, AlgoChatConfig, AlgorandConfig};
 
 mod agent;
+mod algochat_transport;
 mod algorand;
 mod bridge;
 mod config;
@@ -227,6 +228,10 @@ enum Command {
         /// Enable health check HTTP endpoint on this port (e.g. 9090)
         #[arg(long, env = "CAN_HEALTH_PORT")]
         health_port: Option<u16>,
+
+        /// Use the new plugin runtime instead of the legacy message loop
+        #[arg(long, default_value = "false")]
+        runtime: bool,
     },
 
     /// Send an encrypted message to a contact, address, or group
@@ -810,6 +815,7 @@ async fn cmd_run(
     no_plugins: bool,
     no_hub: bool,
     health_port: Option<u16>,
+    use_runtime: bool,
     data_dir: &str,
 ) -> Result<()> {
     // First-run check: if no keystore and no seed flag, guide the user
@@ -1081,30 +1087,93 @@ async fn cmd_run(
         println!("  Health:   http://localhost:{}/health", port);
     }
 
-    let loop_client = Arc::clone(&client);
-    let loop_algod = Arc::clone(&algod_for_tx);
-    let loop_config = agent::AgentLoopConfig {
-        poll_interval_secs: poll_interval,
-        hub_url: if no_hub { None } else { Some(hub_url.clone()) },
-        agent_name: name.clone(),
-        agent_address: agent_address.clone(),
-        signing_key,
-    };
+    if use_runtime {
+        // ── New plugin runtime ──────────────────────────────────────────
+        info!("using plugin runtime");
+        ui::field("Runtime:", &format!("{}", "plugin-runtime".green()));
 
-    let message_task = tokio::spawn(async move {
-        agent::run_message_loop(loop_client, loop_algod, loop_config).await;
-    });
+        let transport = Arc::new(algochat_transport::AlgoChatTransport::new(
+            Arc::clone(&client),
+            Arc::clone(&algod_for_tx),
+            agent_address.clone(),
+            signing_key,
+        ));
 
-    info!("can agent ready — listening for AlgoChat messages");
-
-    tokio::select! {
-        _ = tokio::signal::ctrl_c() => {
-            info!("shutting down (ctrl+c)");
+        let mut plugin_configs = std::collections::HashMap::new();
+        // Pass hub config from nano.toml if present
+        if !no_hub {
+            let mut hub_cfg = toml::Table::new();
+            hub_cfg.insert("url".into(), toml::Value::String(hub_url.clone()));
+            plugin_configs.insert("hub".into(), hub_cfg);
         }
-        result = message_task => {
-            match result {
-                Ok(()) => info!("message loop ended"),
-                Err(e) => tracing::error!(error = %e, "message loop panicked"),
+        // Pass auto-reply config from nano.toml if present
+        let nano_cfg = config::NanoConfig::load(data_dir)?;
+        if let Some(ar_cfg) = nano_cfg.plugin_config("auto-reply") {
+            plugin_configs.insert("auto-reply".into(), ar_cfg);
+        }
+
+        let rt_config = nano_runtime::RuntimeConfig {
+            poll_interval_secs: poll_interval,
+            agent_name: name.clone(),
+            plugin_configs,
+        };
+
+        let mut runtime = nano_runtime::Runtime::new(transport, rt_config);
+
+        // Load built-in plugins
+        if !no_hub {
+            runtime
+                .add_plugin(Box::new(
+                    nano_runtime::plugins::hub::HubPlugin::new(&hub_url),
+                ))
+                .await?;
+        }
+
+        // Always load auto-reply (with empty rules if unconfigured)
+        runtime
+            .add_plugin(Box::new(
+                nano_runtime::plugins::auto_reply::AutoReplyPlugin::new(),
+            ))
+            .await?;
+
+        let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+        let ctrl_c_task = tokio::spawn(async move {
+            let _ = tokio::signal::ctrl_c().await;
+            info!("shutting down (ctrl+c)");
+            let _ = shutdown_tx.send(true);
+        });
+
+        info!("can agent ready — plugin runtime listening for messages");
+
+        runtime.run(shutdown_rx).await?;
+        ctrl_c_task.abort();
+    } else {
+        // ── Legacy message loop ─────────────────────────────────────────
+        let loop_client = Arc::clone(&client);
+        let loop_algod = Arc::clone(&algod_for_tx);
+        let loop_config = agent::AgentLoopConfig {
+            poll_interval_secs: poll_interval,
+            hub_url: if no_hub { None } else { Some(hub_url.clone()) },
+            agent_name: name.clone(),
+            agent_address: agent_address.clone(),
+            signing_key,
+        };
+
+        let message_task = tokio::spawn(async move {
+            agent::run_message_loop(loop_client, loop_algod, loop_config).await;
+        });
+
+        info!("can agent ready — listening for AlgoChat messages");
+
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {
+                info!("shutting down (ctrl+c)");
+            }
+            result = message_task => {
+                match result {
+                    Ok(()) => info!("message loop ended"),
+                    Err(e) => tracing::error!(error = %e, "message loop panicked"),
+                }
             }
         }
     }
@@ -2491,6 +2560,7 @@ async fn main() -> Result<()> {
             no_plugins,
             no_hub,
             health_port,
+            runtime,
         } => {
             cmd_run(
                 network,
@@ -2507,6 +2577,7 @@ async fn main() -> Result<()> {
                 no_plugins || cfg.runtime.no_plugins,
                 no_hub || cfg.hub.disabled,
                 health_port.or(cfg.runtime.health_port),
+                runtime,
                 data_dir,
             )
             .await
