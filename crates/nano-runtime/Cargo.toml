@@ -6,7 +6,7 @@ license.workspace = true
 description = "Event-driven plugin runtime for corvid-agent-nano"
 
 [dependencies]
-nano-transport = { path = "../nano-transport" }
+nano-transport = { path = "../nano-transport", version = "0.2.0" }
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
