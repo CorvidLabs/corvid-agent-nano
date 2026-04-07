@@ -1,7 +1,7 @@
 ---
 module: module-name
 version: 1
-status: draft
+status: draft # draft | review | stable | deprecated
 files:
   - crates/module/src/file.rs
 depends_on: []

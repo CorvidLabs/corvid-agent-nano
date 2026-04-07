@@ -1,7 +1,7 @@
 ---
 module: contacts
 version: 1
-status: active
+status: stable
 files:
   - src/contacts.rs
 depends_on: []

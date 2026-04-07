@@ -1,7 +1,7 @@
 ---
 module: plugin-sdk
 version: 1
-status: active
+status: stable
 files:
   - crates/corvid-plugin-sdk/src/lib.rs
   - crates/corvid-plugin-sdk/src/manifest.rs
@@ -228,4 +228,5 @@ None — this is a library crate with no runtime configuration.
 | Date | Author | Change |
 |------|--------|--------|
 | 2026-03-28 | CorvidAgent | Initial spec from council synthesis (Issue #15) |
+| 2026-04-06 | CorvidAgent | Updated to spec-sync v3.3.0 format — status: active → stable |
 | 2026-03-28 | CorvidAgent | Promoted to active — field types updated to match implementation (String/Vec vs static refs) |

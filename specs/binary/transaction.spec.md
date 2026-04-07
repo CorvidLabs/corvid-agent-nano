@@ -1,7 +1,7 @@
 ---
 module: transaction
 version: 1
-status: active
+status: stable
 files:
   - src/transaction.rs
 depends_on:

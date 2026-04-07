@@ -1,7 +1,7 @@
 ---
 module: keystore
 version: 1
-status: active
+status: stable
 files:
   - src/keystore.rs
 depends_on: []
