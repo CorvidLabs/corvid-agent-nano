@@ -134,8 +134,8 @@ can plugin health
 # Health monitoring
 can run --health-port 9090
 
-# JSON logging for log aggregation
-can run --log-format json
+# JSON logging for log aggregation (--log-format is a global flag)
+can --log-format json run --health-port 9090
 
 # Check health
 curl -s http://localhost:9090/health | jq
