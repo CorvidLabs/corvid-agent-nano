@@ -2342,6 +2342,31 @@ async fn cmd_fund(
                 .ok_or_else(|| anyhow::anyhow!("Missing genesis-hash"))?;
             let min_fee = params_resp["min-fee"].as_u64().unwrap_or(1000);
 
+            // Build msgpack-encoded transaction (KMD expects binary, not JSON)
+            use base64::Engine;
+            let genesis_hash_bytes: [u8; 32] = base64::engine::general_purpose::STANDARD
+                .decode(genesis_hash)?
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("Invalid genesis hash length"))?;
+
+            let suggested_params = algochat::SuggestedParams {
+                fee: min_fee,
+                min_fee,
+                first_valid: last_round,
+                last_valid: last_round + 1000,
+                genesis_id: genesis_id.to_string(),
+                genesis_hash: genesis_hash_bytes,
+            };
+
+            let txn_bytes = crate::transaction::build_payment_transaction_with_amount(
+                funder,
+                &target_addr,
+                amount,
+                &suggested_params,
+            )?;
+
+            let txn_b64 = base64::engine::general_purpose::STANDARD.encode(&txn_bytes);
+
             // Sign transaction via KMD
             let sign_resp: serde_json::Value = http
                 .post(format!("{}/v1/transaction/sign", kmd_url))
@@ -2349,17 +2374,7 @@ async fn cmd_fund(
                 .json(&serde_json::json!({
                     "wallet_handle_token": wallet_handle,
                     "wallet_password": "",
-                    "transaction": {
-                        "type": "pay",
-                        "from": funder,
-                        "to": target_addr,
-                        "fee": min_fee,
-                        "amount": amount,
-                        "first-round": last_round,
-                        "last-round": last_round + 1000,
-                        "genesis-id": genesis_id,
-                        "genesis-hash": genesis_hash,
-                    }
+                    "transaction": txn_b64
                 }))
                 .send()
                 .await?
@@ -2371,14 +2386,13 @@ async fn cmd_fund(
                 .ok_or_else(|| anyhow::anyhow!("Failed to sign transaction: {:?}", sign_resp))?;
 
             // Decode and submit
-            use base64::Engine;
-            let txn_bytes = base64::engine::general_purpose::STANDARD.decode(signed_txn)?;
+            let signed_bytes = base64::engine::general_purpose::STANDARD.decode(signed_txn)?;
 
             let submit_resp = http
                 .post(format!("{}/v2/transactions", algod_url))
                 .header("X-Algo-API-Token", &algod_token)
                 .header("Content-Type", "application/x-binary")
-                .body(txn_bytes)
+                .body(signed_bytes)
                 .send()
                 .await?;
 
