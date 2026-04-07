@@ -20,6 +20,7 @@ mod bridge;
 mod contacts;
 mod groups;
 mod keystore;
+mod mcp;
 mod sidecar;
 mod storage;
 mod transaction;
@@ -107,6 +108,23 @@ struct Cli {
     /// Data directory for persistent storage
     #[arg(long, default_value = "./data", global = true)]
     data_dir: String,
+
+    /// Log output format
+    #[arg(long, default_value = "text", global = true, env = "CAN_LOG_FORMAT")]
+    log_format: LogFormat,
+
+    /// Log level (overrides RUST_LOG env var)
+    #[arg(long, global = true, env = "CAN_LOG_LEVEL")]
+    log_level: Option<String>,
+}
+
+/// Log output format.
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum LogFormat {
+    /// Human-readable text (default)
+    Text,
+    /// Machine-readable JSON (for structured log aggregation)
+    Json,
 }
 
 #[derive(Subcommand)]
@@ -204,6 +222,10 @@ enum Command {
         /// Run in direct P2P mode (no hub forwarding — receive and store only)
         #[arg(long, default_value = "false")]
         no_hub: bool,
+
+        /// Enable health check HTTP endpoint on this port (e.g. 9090)
+        #[arg(long, env = "CAN_HEALTH_PORT")]
+        health_port: Option<u16>,
     },
 
     /// Send an encrypted message to a contact, address, or group
@@ -335,8 +357,8 @@ enum Command {
         action: PluginAction,
     },
 
-    /// Fund the agent wallet from the localnet faucet (or show instructions for testnet/mainnet)
-    Fund {
+    /// Start an MCP server over stdio (for Claude Code / AI agent integration)
+    Mcp {
         /// Algorand network preset
         #[arg(long, default_value = "localnet", env = "CAN_NETWORK")]
         network: Network,
@@ -349,32 +371,25 @@ enum Command {
         #[arg(long, env = "CAN_ALGOD_TOKEN")]
         algod_token: Option<String>,
 
-        /// Agent Algorand address. If not provided, reads from keystore.
+        /// Override: Algorand indexer URL
+        #[arg(long, env = "CAN_INDEXER_URL")]
+        indexer_url: Option<String>,
+
+        /// Override: Algorand indexer token
+        #[arg(long, env = "CAN_INDEXER_TOKEN")]
+        indexer_token: Option<String>,
+
+        /// Agent seed (hex). If not provided, loads from keystore.
+        #[arg(long, env = "CAN_SEED")]
+        seed: Option<String>,
+
+        /// Agent Algorand address. Required if --seed is provided.
         #[arg(long, env = "CAN_ADDRESS")]
         address: Option<String>,
 
-        /// KMD URL (localnet only)
-        #[arg(long, default_value = "http://localhost:4002")]
-        kmd_url: String,
-
-        /// KMD API token (localnet only)
-        #[arg(long)]
-        kmd_token: Option<String>,
-
-        /// Amount to fund in microAlgos (default: 10 ALGO = 10_000_000)
-        #[arg(long, default_value = "10000000")]
-        amount: u64,
-    },
-
-    /// Register the agent with the hub
-    Register {
-        /// Agent Algorand address. If not provided, reads from keystore.
-        #[arg(long, env = "CAN_ADDRESS")]
-        address: Option<String>,
-
-        /// Agent display name
-        #[arg(long, default_value = "can")]
-        name: String,
+        /// Keystore password (for loading from keystore)
+        #[arg(long, env = "CAN_PASSWORD")]
+        password: Option<String>,
 
         /// corvid-agent hub URL
         #[arg(long, default_value = "http://localhost:3578")]
@@ -685,6 +700,7 @@ async fn cmd_run(
     poll_interval: u64,
     no_plugins: bool,
     no_hub: bool,
+    health_port: Option<u16>,
     data_dir: &str,
 ) -> Result<()> {
     // First-run check: if no keystore and no seed flag, guide the user
@@ -928,6 +944,33 @@ async fn cmd_run(
     };
 
     let algod_for_tx = Arc::new(HttpAlgodClient::new(&algod_url, &algod_token));
+
+    // ── Health check HTTP endpoint ───────────────────────────────────
+    let start_time = std::time::Instant::now();
+    if let Some(port) = health_port {
+        let health_network = network.to_string();
+        let health_address = agent_address.clone();
+        let health_algod = algod_url.clone();
+        let health_indexer = indexer_url.clone();
+        let health_hub = if no_hub { None } else { Some(hub_url.clone()) };
+        tokio::spawn(async move {
+            if let Err(e) = mcp::serve_health(
+                port,
+                health_network,
+                health_address,
+                health_algod,
+                health_indexer,
+                health_hub,
+                start_time,
+            )
+            .await
+            {
+                warn!(error = %e, "health check server error");
+            }
+        });
+        info!(port = port, "health check endpoint listening on :{}", port);
+        println!("  Health:   http://localhost:{}/health", port);
+    }
 
     let loop_client = Arc::clone(&client);
     let loop_algod = Arc::clone(&algod_for_tx);
@@ -2120,13 +2163,28 @@ async fn cmd_register(
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
-        )
-        .init();
-
     let cli = Cli::parse();
+
+    let env_filter = if let Some(ref level) = cli.log_level {
+        tracing_subscriber::EnvFilter::new(level)
+    } else {
+        tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into())
+    };
+
+    match cli.log_format {
+        LogFormat::Json => {
+            tracing_subscriber::fmt()
+                .json()
+                .with_env_filter(env_filter)
+                .init();
+        }
+        LogFormat::Text => {
+            tracing_subscriber::fmt()
+                .with_env_filter(env_filter)
+                .init();
+        }
+    }
+
     let data_dir = &cli.data_dir;
 
     match cli.command {
@@ -2169,6 +2227,7 @@ async fn main() -> Result<()> {
             poll_interval,
             no_plugins,
             no_hub,
+            health_port,
         } => {
             cmd_run(
                 network,
@@ -2184,6 +2243,7 @@ async fn main() -> Result<()> {
                 poll_interval,
                 no_plugins,
                 no_hub,
+                health_port,
                 data_dir,
             )
             .await
@@ -2289,5 +2349,31 @@ async fn main() -> Result<()> {
             name,
             hub_url,
         } => cmd_register(address, name, hub_url, data_dir).await,
+
+        Command::Mcp {
+            network,
+            algod_url,
+            algod_token,
+            indexer_url,
+            indexer_token,
+            seed,
+            address,
+            password,
+            hub_url,
+        } => {
+            mcp::cmd_mcp(
+                network,
+                algod_url,
+                algod_token,
+                indexer_url,
+                indexer_token,
+                seed,
+                address,
+                password,
+                hub_url,
+                data_dir,
+            )
+            .await
+        }
     }
 }
