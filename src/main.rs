@@ -309,6 +309,44 @@ enum Command {
         new_password: Option<String>,
     },
 
+    /// Show message history (bidirectional, chronological)
+    History {
+        /// Filter by contact name or Algorand address
+        #[arg(long)]
+        contact: Option<String>,
+
+        /// Maximum number of messages to display
+        #[arg(long, default_value = "20")]
+        limit: usize,
+    },
+
+    /// Show ALGO balance
+    Balance {
+        /// Algorand network preset
+        #[arg(long, default_value = "localnet", env = "CAN_NETWORK")]
+        network: Network,
+
+        /// Override: Algorand node URL
+        #[arg(long, env = "CAN_ALGOD_URL")]
+        algod_url: Option<String>,
+
+        /// Override: Algorand node token
+        #[arg(long, env = "CAN_ALGOD_TOKEN")]
+        algod_token: Option<String>,
+
+        /// Agent seed (hex). If not provided, loads from keystore.
+        #[arg(long, env = "CAN_SEED")]
+        seed: Option<String>,
+
+        /// Agent Algorand address. Required if --seed is provided.
+        #[arg(long, env = "CAN_ADDRESS")]
+        address: Option<String>,
+
+        /// Keystore password (for loading from keystore)
+        #[arg(long, env = "CAN_PASSWORD")]
+        password: Option<String>,
+    },
+
     /// Show agent identity and status
     Info,
 
@@ -1788,6 +1826,179 @@ fn cmd_inbox(from: Option<String>, limit: usize, data_dir: &str) -> Result<()> {
     Ok(())
 }
 
+fn cmd_history(contact: Option<String>, limit: usize, data_dir: &str) -> Result<()> {
+    let data_path = std::path::Path::new(data_dir);
+    let messages_db = data_path.join("messages.db");
+
+    if !messages_db.exists() {
+        ui::warn("No messages yet.");
+        println!(
+            "  Run {} to start receiving messages.",
+            "can run".cyan().bold()
+        );
+        return Ok(());
+    }
+
+    let conn = rusqlite::Connection::open(&messages_db)?;
+
+    // Load contacts for name resolution
+    let contacts_path = contacts_db_path(data_dir);
+    let contact_store = if contacts_path.exists() {
+        Some(ContactStore::open(&contacts_path)?)
+    } else {
+        None
+    };
+
+    // Resolve --contact filter to an address if it's a contact name
+    let contact_address = if let Some(ref contact_str) = contact {
+        if let Some(store) = &contact_store {
+            if let Some(c) = store.get(contact_str)? {
+                Some(c.address)
+            } else {
+                Some(contact_str.clone())
+            }
+        } else {
+            Some(contact_str.clone())
+        }
+    } else {
+        None
+    };
+
+    // Query messages
+    let (query, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
+        if let Some(ref addr) = contact_address {
+            (
+                "SELECT id, participant, sender, recipient, content, timestamp_secs, \
+                     confirmed_round, direction, reply_to_id, reply_to_preview \
+                     FROM messages WHERE participant = ?1 \
+                     ORDER BY timestamp_secs DESC LIMIT ?2"
+                    .to_string(),
+                vec![
+                    Box::new(addr.clone()) as Box<dyn rusqlite::types::ToSql>,
+                    Box::new(limit as i64),
+                ],
+            )
+        } else {
+            (
+                "SELECT id, participant, sender, recipient, content, timestamp_secs, \
+                     confirmed_round, direction, reply_to_id, reply_to_preview \
+                     FROM messages \
+                     ORDER BY timestamp_secs DESC LIMIT ?1"
+                    .to_string(),
+                vec![Box::new(limit as i64) as Box<dyn rusqlite::types::ToSql>],
+            )
+        };
+
+    let mut stmt = conn.prepare(&query)?;
+    let params_refs: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|p| &**p).collect();
+    let rows = stmt.query_map(params_refs.as_slice(), |row| {
+        let sender: String = row.get(2)?;
+        let recipient: String = row.get(3)?;
+        let content: String = row.get(4)?;
+        let timestamp_secs: i64 = row.get(5)?;
+        let direction: String = row.get(7)?;
+        Ok((sender, recipient, content, timestamp_secs, direction))
+    })?;
+
+    let mut messages: Vec<_> = rows.collect::<std::result::Result<Vec<_>, _>>()?;
+
+    if messages.is_empty() {
+        if let Some(ref c) = contact {
+            ui::warn(&format!("No messages with {}.", c));
+        } else {
+            ui::warn("No message history.");
+            println!(
+                "  Run {} to start receiving messages.",
+                "can run".cyan().bold()
+            );
+        }
+        return Ok(());
+    }
+
+    // Reverse so oldest is first (queried DESC for limit, display ASC)
+    messages.reverse();
+
+    // Resolve address to contact name
+    let resolve_name = |addr: &str| -> String {
+        if let Some(store) = &contact_store {
+            if let Ok(Some(c)) = store.get_by_address(addr) {
+                return c.name;
+            }
+        }
+        if addr.len() > 12 {
+            format!("{}...", &addr[..12])
+        } else {
+            addr.to_string()
+        }
+    };
+
+    ui::header("Message History");
+    ui::table_header(&format!(
+        "  {:<20} {:<16} MESSAGE",
+        "TIME", "FROM"
+    ));
+    ui::separator(72);
+
+    for (sender, _recipient, content, timestamp_secs, direction) in &messages {
+        let time_str = chrono::DateTime::from_timestamp(*timestamp_secs, 0)
+            .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+
+        let from_label = if direction == "sent" {
+            "you".to_string()
+        } else {
+            resolve_name(sender)
+        };
+
+        // Truncate content for display
+        let display_content = if content.len() > 50 {
+            format!("{}...", &content[..47])
+        } else {
+            content.clone()
+        };
+
+        println!(
+            "  {:<20} {:<16} {}",
+            time_str.dimmed(),
+            from_label.bright_white(),
+            display_content
+        );
+    }
+
+    println!("\n  {} message(s)", messages.len().to_string().cyan());
+    Ok(())
+}
+
+async fn cmd_balance(
+    network: Network,
+    algod_url: Option<String>,
+    algod_token: Option<String>,
+    seed_hex: Option<String>,
+    address: Option<String>,
+    password: Option<String>,
+    data_dir: &str,
+) -> Result<()> {
+    use algochat::AlgodClient;
+
+    let net = network.defaults();
+    let algod_url = algod_url.unwrap_or(net.algod_url);
+    let algod_token = algod_token.unwrap_or(net.algod_token);
+
+    let (_seed, addr) = load_identity(
+        seed_hex.as_deref(),
+        address.as_deref(),
+        password.as_deref(),
+        data_dir,
+    )?;
+
+    let algod = HttpAlgodClient::new(&algod_url, &algod_token);
+    let info = algod.get_account_info(&addr).await?;
+    let algo = info.amount as f64 / 1_000_000.0;
+
+    println!("{}", ui::balance(algo));
+    Ok(())
+}
+
 async fn cmd_plugin(action: PluginAction, data_dir: &str) -> Result<()> {
     let data_path = std::path::Path::new(data_dir);
     let socket_path = sidecar::SidecarHandle::socket_path(data_path);
@@ -2280,6 +2491,19 @@ async fn main() -> Result<()> {
         }
 
         Command::Inbox { from, limit } => cmd_inbox(from, limit, data_dir),
+
+        Command::History { contact, limit } => cmd_history(contact, limit, data_dir),
+
+        Command::Balance {
+            network,
+            algod_url,
+            algod_token,
+            seed,
+            address,
+            password,
+        } => {
+            cmd_balance(network, algod_url, algod_token, seed, address, password, data_dir).await
+        }
 
         Command::Contacts { action } => cmd_contacts(action, data_dir),
 
