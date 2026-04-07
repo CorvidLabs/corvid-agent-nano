@@ -1,7 +1,7 @@
 ---
 module: wallet
 version: 1
-status: active
+status: stable
 files:
   - src/wallet.rs
 depends_on: []

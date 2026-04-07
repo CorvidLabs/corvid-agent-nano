@@ -140,7 +140,7 @@ fn validate_plugin_path(
     }
 
     // Must have a .wasm extension (quick reject before any I/O)
-    if input_path.extension().map_or(true, |ext| ext != "wasm") {
+    if input_path.extension().is_none_or(|ext| ext != "wasm") {
         return Err("plugin file must have a .wasm extension".into());
     }
 

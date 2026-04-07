@@ -1,7 +1,7 @@
 ---
 module: core
 version: 4
-status: active
+status: stable
 files:
   - src/agent.rs
   - src/storage.rs

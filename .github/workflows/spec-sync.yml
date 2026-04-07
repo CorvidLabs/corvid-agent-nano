@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Spec validation
-        uses: CorvidLabs/spec-sync@v2.4.0
+        uses: CorvidLabs/spec-sync@v3.3.0
         with:
           strict: 'false'
           remote: 'true'

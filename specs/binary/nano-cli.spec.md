@@ -1,7 +1,7 @@
 ---
 module: nano-cli
 version: 6
-status: active
+status: stable
 files:
   - src/main.rs
   - src/agent.rs

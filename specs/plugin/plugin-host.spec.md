@@ -1,7 +1,7 @@
 ---
 module: plugin-host
 version: 1
-status: active
+status: stable
 files:
   - crates/corvid-plugin-host/src/main.rs
   - crates/corvid-plugin-host/src/engine.rs
@@ -310,4 +310,5 @@ Host function linking is implemented — capabilities are gated at instantiation
 | 2026-03-28 | CorvidAgent | Promoted to active — added implementation status markers to RPC methods, host functions, and invariants. Documented stubs (tool discovery, invoke, event dispatch, host function bodies, Ed25519 verification) |
 | 2026-03-28 | CorvidAgent | Implemented Ed25519 signature verification — detached `.sig` file format (hex pubkey + hex sig), trusted key registry at `{data_dir}/trusted-keys/*.pub` |
 | 2026-03-28 | CorvidAgent | Phase A data plane: WASM memory access layer (`wasm_mem.rs`), real `host_kv_get`/`host_kv_set` with namespace isolation, real `host_http_get`/`host_http_post` via `ureq` with SSRF+allowlist validation |
+| 2026-04-06 | CorvidAgent | Updated to spec-sync v3.3.0 format — status: active → stable |
 | 2026-03-28 | CorvidAgent | Phase B data plane: `host_algo_state` with pluggable `AlgoBackend`, `host_send_message` with `MessagingBackend` + target_filter enforcement, `plugin.invoke` RPC via `__corvid_invoke` WASM export, `plugin.event` RPC via `__corvid_on_event`, `invoke.rs` execution module |

@@ -140,8 +140,7 @@ fn is_blocked_host(host_with_port: &str) -> bool {
     }
 
     // IPv4-mapped IPv6 (::ffff:A.B.C.D) — re-check the IPv4 portion
-    if host_lower.starts_with("::ffff:") {
-        let ipv4_part = &host_lower["::ffff:".len()..];
+    if let Some(ipv4_part) = host_lower.strip_prefix("::ffff:") {
         return is_blocked_host(ipv4_part);
     }
 

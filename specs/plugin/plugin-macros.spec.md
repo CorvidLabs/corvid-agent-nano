@@ -1,7 +1,7 @@
 ---
 module: plugin-macros
 version: 1
-status: active
+status: stable
 files:
   - crates/corvid-plugin-macros/src/lib.rs
 depends_on:
@@ -126,4 +126,5 @@ None — this is a proc-macro crate with no runtime configuration.
 | Date | Author | Change |
 |------|--------|--------|
 | 2026-03-28 | CorvidAgent | Initial spec from council synthesis (Issue #15) |
+| 2026-04-06 | CorvidAgent | Updated to spec-sync v3.3.0 format — status: active → stable |
 | 2026-03-28 | CorvidAgent | Promoted to active — updated export names (`__corvid_*`), signatures (`i64` packed returns), payload formats, added `#[corvid_tool]` macro, `__corvid_alloc`/`__corvid_dealloc`, removed unimplemented `catch_unwind` claim |

@@ -18,7 +18,7 @@ Each `.spec.md` file has two parts:
 ---
 module: module-name
 version: 1
-status: draft | active | deprecated
+status: draft | review | stable | deprecated
 files:
   - crates/module/src/file.rs
 depends_on:
@@ -28,7 +28,7 @@ depends_on:
 
 - **module**: Human-readable identifier
 - **version**: Increment when the spec changes materially
-- **status**: `draft` (untested), `active` (validated), `deprecated` (superseded)
+- **status**: `draft` (untested), `review` (under review), `stable` (validated), `deprecated` (superseded)
 - **files**: Source files this spec covers
 - **depends_on**: Other specs this module requires
 

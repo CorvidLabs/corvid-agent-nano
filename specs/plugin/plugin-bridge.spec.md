@@ -1,7 +1,7 @@
 ---
 module: plugin-bridge
 version: 2
-status: active
+status: stable
 files:
   - server/plugins/rust-bridge.ts
   - server/routes/plugins.ts
@@ -219,5 +219,6 @@ interface PluginBridgeOptions {
 
 | Date | Author | Change |
 |------|--------|--------|
+| 2026-04-06 | CorvidAgent | Updated to spec-sync v3.3.0 format — status: active → stable |
 | 2026-03-31 | Magpie | Updated spec to match actual implementation: added all exported interfaces/functions, clarified `refreshTools()` auto-registration, fixed Configuration to use constructor options, updated field names to snake_case, expanded REST endpoint documentation |
 | 2026-03-28 | CorvidAgent | Initial spec from council synthesis (Issue #15) |
