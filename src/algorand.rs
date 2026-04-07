@@ -373,6 +373,149 @@ fn base64_decode_32(s: &str) -> Result<[u8; 32]> {
     Ok(arr)
 }
 
+// ---------------------------------------------------------------------------
+// Chain-wide scanning (not part of the IndexerClient trait)
+// ---------------------------------------------------------------------------
+
+/// Summary of an address seen in AlgoChat transactions.
+#[derive(Debug, Clone)]
+pub struct DiscoveredAgent {
+    pub address: String,
+    pub sent: u64,
+    pub received: u64,
+    pub first_seen_round: u64,
+    pub last_seen_round: u64,
+    pub last_seen_time: u64,
+}
+
+/// A raw AlgoChat transaction visible on-chain (metadata only — content is encrypted).
+#[derive(Debug, Clone)]
+pub struct ChainMessage {
+    pub txid: String,
+    pub sender: String,
+    pub receiver: String,
+    pub confirmed_round: u64,
+    pub round_time: u64,
+    pub note_len: usize,
+}
+
+impl HttpIndexerClient {
+    /// Search ALL AlgoChat transactions on the chain (note-prefix=AQ).
+    /// Returns raw transaction metadata — no decryption.
+    pub async fn scan_all_algochat(
+        &self,
+        after_round: Option<u64>,
+        limit: Option<u32>,
+    ) -> Result<Vec<ChainMessage>> {
+        let mut url = format!("{}/v2/transactions?note-prefix=AQ", self.base_url);
+        if let Some(round) = after_round {
+            url.push_str(&format!("&min-round={}", round + 1));
+        }
+        let limit = limit.unwrap_or(500);
+        url.push_str(&format!("&limit={}", limit));
+
+        debug!(url = %url, "scanning all AlgoChat transactions");
+
+        let resp: IndexerSearchResponse = self
+            .client
+            .get(&url)
+            .header("X-Indexer-API-Token", &self.token)
+            .send()
+            .await
+            .map_err(|e| AlgoChatError::TransactionFailed(e.to_string()))?
+            .json()
+            .await
+            .map_err(|e| AlgoChatError::TransactionFailed(e.to_string()))?;
+
+        Ok(resp
+            .transactions
+            .unwrap_or_default()
+            .iter()
+            .map(|tx| {
+                let receiver = tx
+                    .payment_transaction
+                    .as_ref()
+                    .map(|p| p.receiver.clone())
+                    .unwrap_or_default();
+                let note_len = tx
+                    .note
+                    .as_ref()
+                    .and_then(|n| base64::decode(n).ok())
+                    .map(|b| b.len())
+                    .unwrap_or(0);
+                ChainMessage {
+                    txid: tx.id.clone(),
+                    sender: tx.sender.clone(),
+                    receiver,
+                    confirmed_round: tx.confirmed_round,
+                    round_time: tx.round_time,
+                    note_len,
+                }
+            })
+            .collect())
+    }
+
+    /// Discover all unique addresses that have participated in AlgoChat.
+    pub async fn discover_agents(
+        &self,
+        after_round: Option<u64>,
+        limit: Option<u32>,
+    ) -> Result<Vec<DiscoveredAgent>> {
+        let messages = self.scan_all_algochat(after_round, limit).await?;
+
+        let mut agents: std::collections::HashMap<String, DiscoveredAgent> =
+            std::collections::HashMap::new();
+
+        for msg in &messages {
+            // Track sender
+            let entry = agents
+                .entry(msg.sender.clone())
+                .or_insert_with(|| DiscoveredAgent {
+                    address: msg.sender.clone(),
+                    sent: 0,
+                    received: 0,
+                    first_seen_round: msg.confirmed_round,
+                    last_seen_round: msg.confirmed_round,
+                    last_seen_time: msg.round_time,
+                });
+            entry.sent += 1;
+            if msg.confirmed_round < entry.first_seen_round {
+                entry.first_seen_round = msg.confirmed_round;
+            }
+            if msg.confirmed_round > entry.last_seen_round {
+                entry.last_seen_round = msg.confirmed_round;
+                entry.last_seen_time = msg.round_time;
+            }
+
+            // Track receiver
+            if !msg.receiver.is_empty() {
+                let entry = agents
+                    .entry(msg.receiver.clone())
+                    .or_insert_with(|| DiscoveredAgent {
+                        address: msg.receiver.clone(),
+                        sent: 0,
+                        received: 0,
+                        first_seen_round: msg.confirmed_round,
+                        last_seen_round: msg.confirmed_round,
+                        last_seen_time: msg.round_time,
+                    });
+                entry.received += 1;
+                if msg.confirmed_round < entry.first_seen_round {
+                    entry.first_seen_round = msg.confirmed_round;
+                }
+                if msg.confirmed_round > entry.last_seen_round {
+                    entry.last_seen_round = msg.confirmed_round;
+                    entry.last_seen_time = msg.round_time;
+                }
+            }
+        }
+
+        let mut result: Vec<DiscoveredAgent> = agents.into_values().collect();
+        result.sort_by(|a, b| b.last_seen_round.cmp(&a.last_seen_round));
+        Ok(result)
+    }
+}
+
 /// Convenience module for base64 decoding (using the base64 crate).
 mod base64 {
     use data_encoding::BASE64;
