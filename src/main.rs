@@ -286,6 +286,44 @@ enum Command {
         limit: usize,
     },
 
+    /// Show message history (alias for inbox with --contact)
+    History {
+        /// Filter by contact name or Algorand address
+        #[arg(long)]
+        contact: Option<String>,
+
+        /// Maximum number of messages to display
+        #[arg(long, default_value = "20")]
+        limit: usize,
+    },
+
+    /// Quick ALGO balance check
+    Balance {
+        /// Algorand network preset
+        #[arg(long, default_value = "localnet", env = "CAN_NETWORK")]
+        network: Network,
+
+        /// Override: Algorand node URL
+        #[arg(long, env = "CAN_ALGOD_URL")]
+        algod_url: Option<String>,
+
+        /// Override: Algorand node token
+        #[arg(long, env = "CAN_ALGOD_TOKEN")]
+        algod_token: Option<String>,
+
+        /// Agent seed (hex). If not provided, loads from keystore.
+        #[arg(long, env = "CAN_SEED")]
+        seed: Option<String>,
+
+        /// Agent Algorand address. Required if --seed is provided.
+        #[arg(long, env = "CAN_ADDRESS")]
+        address: Option<String>,
+
+        /// Keystore password (for loading from keystore)
+        #[arg(long, env = "CAN_PASSWORD")]
+        password: Option<String>,
+    },
+
     /// Manage contacts
     Contacts {
         #[command(subcommand)]
@@ -1271,6 +1309,48 @@ fn cmd_info(data_dir: &str) -> Result<()> {
     Ok(())
 }
 
+async fn cmd_balance(
+    network: Network,
+    algod_url: Option<String>,
+    algod_token: Option<String>,
+    seed_hex: Option<String>,
+    address: Option<String>,
+    password: Option<String>,
+    data_dir: &str,
+) -> Result<()> {
+    use algochat::AlgodClient;
+
+    let net = network.defaults();
+    let algod_url = algod_url.unwrap_or(net.algod_url);
+    let algod_token = algod_token.unwrap_or(net.algod_token);
+
+    let (_seed, addr) = load_identity(
+        seed_hex.as_deref(),
+        address.as_deref(),
+        password.as_deref(),
+        data_dir,
+    )?;
+
+    let algod = HttpAlgodClient::new(&algod_url, &algod_token);
+    let info = algod.get_account_info(&addr).await?;
+    let algo = info.amount as f64 / 1_000_000.0;
+    let min_algo = info.min_balance as f64 / 1_000_000.0;
+    let available = algo - min_algo;
+
+    println!("{}", ui::balance(algo));
+    if available < algo {
+        println!(
+            "  {} {:.6} ALGO  {} {:.6} ALGO",
+            "Available:".dimmed(),
+            available,
+            "Min balance:".dimmed(),
+            min_algo,
+        );
+    }
+
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn cmd_status(
     network: Network,
@@ -1388,10 +1468,35 @@ async fn cmd_status(
             [],
             |r| r.get(0),
         )?;
-        ui::field(
-            "Messages:",
-            &format!("{} ({} conversations)", msg_count, conv_count),
-        );
+        let last_ts: Option<i64> = conn
+            .query_row(
+                "SELECT MAX(timestamp_secs) FROM messages",
+                [],
+                |r| r.get(0),
+            )
+            .ok()
+            .flatten();
+        let last_str = if let Some(ts) = last_ts {
+            let now = chrono::Utc::now().timestamp();
+            let ago = now - ts;
+            if ago < 60 {
+                format!("last: {}s ago", ago)
+            } else if ago < 3600 {
+                format!("last: {}m ago", ago / 60)
+            } else if ago < 86400 {
+                format!("last: {}h ago", ago / 3600)
+            } else {
+                format!("last: {}d ago", ago / 86400)
+            }
+        } else {
+            String::new()
+        };
+        let msg_detail = if last_str.is_empty() {
+            format!("{} ({} conversations)", msg_count, conv_count)
+        } else {
+            format!("{} ({} conversations, {})", msg_count, conv_count, last_str)
+        };
+        ui::field("Messages:", &msg_detail);
     } else {
         ui::field("Messages:", "0 (no cache)");
     }
@@ -1887,278 +1992,6 @@ async fn cmd_plugin(action: PluginAction, data_dir: &str) -> Result<()> {
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
-// Fund command — KMD faucet for localnet
-// ---------------------------------------------------------------------------
-
-/// KMD API response types.
-mod kmd {
-    use serde::Deserialize;
-
-    #[derive(Deserialize)]
-    pub struct WalletsResponse {
-        pub wallets: Option<Vec<Wallet>>,
-    }
-
-    #[derive(Deserialize)]
-    pub struct Wallet {
-        pub id: String,
-        pub name: String,
-    }
-
-    #[derive(Deserialize)]
-    pub struct InitResponse {
-        pub wallet_handle_token: String,
-    }
-
-    #[derive(Deserialize)]
-    pub struct KeysResponse {
-        pub addresses: Option<Vec<String>>,
-    }
-
-    #[derive(Deserialize)]
-    pub struct SignResponse {
-        pub signed_transaction: String, // base64
-    }
-}
-
-struct FundParams {
-    network: Network,
-    algod_url: Option<String>,
-    algod_token: Option<String>,
-    address: Option<String>,
-    kmd_url: String,
-    kmd_token: Option<String>,
-    amount: u64,
-}
-
-async fn cmd_fund(params: FundParams, data_dir: &str) -> Result<()> {
-    let FundParams {
-        network,
-        algod_url,
-        algod_token,
-        address,
-        kmd_url,
-        kmd_token,
-        amount,
-    } = params;
-    use algochat::AlgodClient;
-    use base64::Engine;
-
-    // Resolve agent address (no password needed — just read from keystore)
-    let agent_address = match address {
-        Some(a) => a,
-        None => {
-            let ks_path = keystore_path(data_dir);
-            if !keystore::keystore_exists(&ks_path) {
-                bail!("No wallet found. Run `can init` first, or provide --address.");
-            }
-            keystore::keystore_address(&ks_path)?
-        }
-    };
-
-    match network {
-        Network::Testnet => {
-            ui::header("Fund your agent on TestNet");
-            ui::field("Address:", &agent_address);
-            ui::field("Dispenser:", "https://bank.testnet.algorand.network");
-            return Ok(());
-        }
-        Network::Mainnet => {
-            ui::header("Fund your agent on MainNet");
-            ui::field("Address:", &agent_address);
-            println!("  {}", "Send ALGO to the address above.".dimmed());
-            return Ok(());
-        }
-        Network::Localnet => {} // continue below
-    }
-
-    let algo = amount as f64 / 1_000_000.0;
-    ui::header(&format!("Funding agent on localnet ({:.6} ALGO)", algo));
-    ui::field("Recipient:", &agent_address);
-
-    // Resolve network config
-    let net = network.defaults();
-    let algod_url = algod_url.unwrap_or(net.algod_url);
-    let algod_token = algod_token.unwrap_or(net.algod_token);
-    let kmd_token = kmd_token.unwrap_or_else(|| "a".repeat(64));
-
-    let http = reqwest::Client::new();
-
-    // 1. List wallets — find "unencrypted-default-wallet"
-    let wallets_resp: kmd::WalletsResponse = http
-        .get(format!("{}/v1/wallets", kmd_url))
-        .header("X-KMD-API-Token", &kmd_token)
-        .send()
-        .await
-        .map_err(|e| anyhow::anyhow!("Cannot connect to KMD at {}: {}", kmd_url, e))?
-        .json()
-        .await?;
-
-    let wallets = wallets_resp.wallets.unwrap_or_default();
-    let default_wallet = wallets
-        .iter()
-        .find(|w| w.name == "unencrypted-default-wallet")
-        .ok_or_else(|| {
-            anyhow::anyhow!("No default wallet found in KMD. Is the localnet running?")
-        })?;
-
-    // 2. Init wallet handle
-    let init_resp: kmd::InitResponse = http
-        .post(format!("{}/v1/wallet/init", kmd_url))
-        .header("X-KMD-API-Token", &kmd_token)
-        .json(&serde_json::json!({
-            "wallet_id": default_wallet.id,
-            "wallet_password": ""
-        }))
-        .send()
-        .await?
-        .json()
-        .await?;
-
-    let handle = &init_resp.wallet_handle_token;
-
-    // 3. List keys — pick first funded address
-    let keys_resp: kmd::KeysResponse = http
-        .post(format!("{}/v1/key/list", kmd_url))
-        .header("X-KMD-API-Token", &kmd_token)
-        .json(&serde_json::json!({ "wallet_handle_token": handle }))
-        .send()
-        .await?
-        .json()
-        .await?;
-
-    let addresses = keys_resp.addresses.unwrap_or_default();
-    let faucet_address = addresses
-        .first()
-        .ok_or_else(|| anyhow::anyhow!("No accounts found in KMD default wallet"))?;
-
-    ui::field("Faucet:", faucet_address);
-
-    // 4. Build unsigned payment transaction
-    let algod = HttpAlgodClient::new(&algod_url, &algod_token);
-    let params = algod
-        .get_suggested_params()
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to get suggested params: {}", e))?;
-
-    let raw_txn = transaction::build_payment_transaction_with_amount(
-        faucet_address,
-        &agent_address,
-        amount,
-        &params,
-    )?;
-
-    // 5. Sign via KMD
-    let b64 = base64::engine::general_purpose::STANDARD;
-    let txn_b64 = b64.encode(&raw_txn);
-
-    let sign_resp: kmd::SignResponse = http
-        .post(format!("{}/v1/transaction/sign", kmd_url))
-        .header("X-KMD-API-Token", &kmd_token)
-        .json(&serde_json::json!({
-            "wallet_handle_token": handle,
-            "wallet_password": "",
-            "transaction": txn_b64
-        }))
-        .send()
-        .await
-        .map_err(|e| anyhow::anyhow!("KMD signing failed: {}", e))?
-        .json()
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to parse KMD sign response: {}", e))?;
-
-    let signed_txn = b64
-        .decode(&sign_resp.signed_transaction)
-        .map_err(|e| anyhow::anyhow!("Invalid base64 in KMD response: {}", e))?;
-
-    // 6. Submit via algod
-    let txid = algod
-        .submit_transaction(&signed_txn)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to submit transaction: {}", e))?;
-
-    ui::field("TxID:", &txid);
-
-    // 7. Wait for confirmation
-    algod
-        .wait_for_confirmation(&txid, 5)
-        .await
-        .map_err(|e| anyhow::anyhow!("Confirmation failed: {}", e))?;
-
-    // Check new balance
-    match algod.get_account_info(&agent_address).await {
-        Ok(info) => {
-            let bal = info.amount as f64 / 1_000_000.0;
-            println!();
-            ui::success(&format!("Funded! New balance: {}", ui::balance(bal)));
-        }
-        Err(_) => {
-            println!();
-            ui::success("Funded! (could not fetch new balance)");
-        }
-    }
-
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// Register command — register agent with the hub
-// ---------------------------------------------------------------------------
-
-async fn cmd_register(
-    address: Option<String>,
-    name: String,
-    hub_url: String,
-    data_dir: &str,
-) -> Result<()> {
-    // Resolve agent address (no password needed)
-    let agent_address = match address {
-        Some(a) => a,
-        None => {
-            let ks_path = keystore_path(data_dir);
-            if !keystore::keystore_exists(&ks_path) {
-                bail!("No wallet found. Run `can init` first, or provide --address.");
-            }
-            keystore::keystore_address(&ks_path)?
-        }
-    };
-
-    ui::header("Registering agent with hub...");
-    ui::field("Address:", &agent_address);
-    ui::field("Name:", &name);
-    ui::field("Hub:", &hub_url);
-
-    let http = reqwest::Client::new();
-    let url = format!("{}/a2a/agents/register", hub_url.trim_end_matches('/'));
-
-    let payload = serde_json::json!({
-        "address": agent_address,
-        "name": name,
-    });
-
-    let resp = http
-        .post(&url)
-        .json(&payload)
-        .send()
-        .await
-        .map_err(|e| anyhow::anyhow!("Cannot connect to hub at {}: {}", hub_url, e))?;
-
-    if resp.status().is_success() {
-        let body: serde_json::Value = resp.json().await.unwrap_or_else(|_| serde_json::json!({}));
-        println!();
-        ui::success("Registered successfully!");
-        if let Some(id) = body.get("id").and_then(|v| v.as_str()) {
-            ui::field("Agent ID:", id);
-        }
-    } else {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        bail!("Hub registration failed (HTTP {}): {}", status, body);
-    }
-
-    Ok(())
-}
-
 // ---------------------------------------------------------------------------
 
 #[tokio::main]
@@ -2281,6 +2114,19 @@ async fn main() -> Result<()> {
 
         Command::Inbox { from, limit } => cmd_inbox(from, limit, data_dir),
 
+        Command::History { contact, limit } => cmd_inbox(contact, limit, data_dir),
+
+        Command::Balance {
+            network,
+            algod_url,
+            algod_token,
+            seed,
+            address,
+            password,
+        } => {
+            cmd_balance(network, algod_url, algod_token, seed, address, password, data_dir).await
+        }
+
         Command::Contacts { action } => cmd_contacts(action, data_dir),
 
         Command::Groups { action } => cmd_groups(action, data_dir),
@@ -2319,36 +2165,6 @@ async fn main() -> Result<()> {
         }
 
         Command::Plugin { action } => cmd_plugin(action, data_dir).await,
-
-        Command::Fund {
-            network,
-            algod_url,
-            algod_token,
-            address,
-            kmd_url,
-            kmd_token,
-            amount,
-        } => {
-            cmd_fund(
-                FundParams {
-                    network,
-                    algod_url,
-                    algod_token,
-                    address,
-                    kmd_url,
-                    kmd_token,
-                    amount,
-                },
-                data_dir,
-            )
-            .await
-        }
-
-        Command::Register {
-            address,
-            name,
-            hub_url,
-        } => cmd_register(address, name, hub_url, data_dir).await,
 
         Command::Mcp {
             network,
