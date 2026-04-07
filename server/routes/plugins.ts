@@ -87,9 +87,16 @@ export function registerPluginRoutes(router: Router, bridge: PluginBridge): void
       );
     }
 
-    if (!PLUGIN_ID_RE.test(id) || !TOOL_NAME_RE.test(tool)) {
+    if (!PLUGIN_ID_RE.test(id)) {
       return Response.json(
-        { error: "invalid plugin id or tool name format" },
+        { error: "invalid plugin id" },
+        { status: 400 },
+      );
+    }
+
+    if (!TOOL_NAME_RE.test(tool)) {
+      return Response.json(
+        { error: "invalid tool name" },
         { status: 400 },
       );
     }
