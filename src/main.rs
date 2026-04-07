@@ -1422,6 +1422,7 @@ async fn cmd_balance(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn cmd_status(
     network: Network,
     algod_url: Option<String>,
@@ -2085,7 +2086,10 @@ fn cmd_config(action: ConfigAction, cfg: &config::NanoConfig, data_dir: &str) ->
                         "localnet" | "testnet" | "mainnet" => {
                             cfg.agent.network = Some(value);
                         }
-                        _ => bail!("Invalid network: {}. Use localnet, testnet, or mainnet.", value),
+                        _ => bail!(
+                            "Invalid network: {}. Use localnet, testnet, or mainnet.",
+                            value
+                        ),
                     }
                 }
                 "network.algod_url" => cfg.network.algod_url = Some(value),
@@ -2099,9 +2103,9 @@ fn cmd_config(action: ConfigAction, cfg: &config::NanoConfig, data_dir: &str) ->
                     })?;
                 }
                 "runtime.poll_interval" => {
-                    cfg.runtime.poll_interval = value.parse().map_err(|_| {
-                        anyhow::anyhow!("Invalid number: {}", value)
-                    })?;
+                    cfg.runtime.poll_interval = value
+                        .parse()
+                        .map_err(|_| anyhow::anyhow!("Invalid number: {}", value))?;
                 }
                 "runtime.no_plugins" => {
                     cfg.runtime.no_plugins = value.parse().map_err(|_| {
@@ -2112,17 +2116,17 @@ fn cmd_config(action: ConfigAction, cfg: &config::NanoConfig, data_dir: &str) ->
                     cfg.runtime.health_port = if value == "none" || value == "null" {
                         None
                     } else {
-                        Some(value.parse().map_err(|_| {
-                            anyhow::anyhow!("Invalid port number: {}", value)
-                        })?)
+                        Some(
+                            value
+                                .parse()
+                                .map_err(|_| anyhow::anyhow!("Invalid port number: {}", value))?,
+                        )
                     };
                 }
-                "logging.format" => {
-                    match value.as_str() {
-                        "text" | "json" => cfg.logging.format = Some(value),
-                        _ => bail!("Invalid log format: {}. Use text or json.", value),
-                    }
-                }
+                "logging.format" => match value.as_str() {
+                    "text" | "json" => cfg.logging.format = Some(value),
+                    _ => bail!("Invalid log format: {}. Use text or json.", value),
+                },
                 "logging.level" => cfg.logging.level = Some(value),
                 _ => bail!(
                     "Unknown config key: {}. Valid keys: agent.name, agent.network, \
@@ -2178,7 +2182,10 @@ async fn cmd_fund(
             let kmd_token = kmd_token.unwrap_or_else(|| "a".repeat(64));
 
             ui::field("Target:", &target_addr);
-            ui::field("Amount:", &format!("{:.6} ALGO", amount as f64 / 1_000_000.0));
+            ui::field(
+                "Amount:",
+                &format!("{:.6} ALGO", amount as f64 / 1_000_000.0),
+            );
             ui::field("KMD:", &kmd_url);
 
             let http = reqwest::Client::new();
@@ -2296,8 +2303,7 @@ async fn cmd_fund(
 
             // Decode and submit
             use base64::Engine;
-            let txn_bytes =
-                base64::engine::general_purpose::STANDARD.decode(signed_txn)?;
+            let txn_bytes = base64::engine::general_purpose::STANDARD.decode(signed_txn)?;
 
             let submit_resp = http
                 .post(format!("{}/v2/transactions", algod_url))
@@ -2332,13 +2338,8 @@ async fn cmd_fund(
             ui::header("Fund on TestNet");
             ui::field("Address:", &target_addr);
             println!();
-            println!(
-                "  Visit the Algorand TestNet dispenser to fund your agent:"
-            );
-            println!(
-                "  {}",
-                "https://bank.testnet.algorand.network".cyan()
-            );
+            println!("  Visit the Algorand TestNet dispenser to fund your agent:");
+            println!("  {}", "https://bank.testnet.algorand.network".cyan());
             println!();
             println!("  Paste your address: {}", target_addr.bright_white());
         }
