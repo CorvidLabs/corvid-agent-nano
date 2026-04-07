@@ -3,6 +3,7 @@
 //! Runs as a sidecar process alongside the corvid-agent TypeScript server.
 //! Socket path: `{data_dir}/plugins.sock`
 
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -61,6 +62,12 @@ struct JsonRpcResponse {
     error: Option<String>,
     id: Option<serde_json::Value>,
 }
+
+/// Maximum bytes accepted per JSON-RPC request line.
+///
+/// Prevents a malicious local client from causing memory exhaustion by sending
+/// a line that never terminates or is pathologically large.
+const MAX_REQUEST_LINE_BYTES: usize = 4 * 1024 * 1024; // 4 MiB
 
 /// Shared server state.
 struct ServerState {
@@ -619,8 +626,10 @@ async fn main() -> Result<()> {
         }
     }
 
-    // Bind Unix socket
+    // Bind Unix socket and restrict to owner-only access (0600).
+    // Without this, any local process can connect and invoke plugin tools.
     let listener = UnixListener::bind(&socket_path)?;
+    std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o600))?;
     tracing::info!(
         socket = %socket_path.display(),
         agent_id = %cli.agent_id,
@@ -641,7 +650,11 @@ async fn main() -> Result<()> {
                 line.clear();
                 match reader.read_line(&mut line).await {
                     Ok(0) => break, // EOF
-                    Ok(_) => {
+                    Ok(n) => {
+                        if n > MAX_REQUEST_LINE_BYTES {
+                            tracing::warn!(bytes = n, "oversized JSON-RPC request; closing connection");
+                            break;
+                        }
                         let req: JsonRpcRequest = match serde_json::from_str(&line) {
                             Ok(r) => r,
                             Err(e) => {

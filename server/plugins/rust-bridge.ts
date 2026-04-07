@@ -105,12 +105,6 @@ const PLUGIN_ID_RE = /^[a-z][a-z0-9-]{0,49}$/;
 /** Tool names: lowercase letters, digits, hyphens, underscores. */
 const TOOL_NAME_RE = /^[a-z][a-z0-9_-]{0,63}$/;
 
-/**
- * Maximum size of the incoming socket buffer before the connection is
- * dropped.  Prevents memory exhaustion from a misbehaving / malicious host.
- */
-const MAX_BUFFER_BYTES = 10 * 1024 * 1024; // 10 MB
-
 // ── Bridge ─────────────────────────────────────────────────────────────
 
 export class PluginBridge {
