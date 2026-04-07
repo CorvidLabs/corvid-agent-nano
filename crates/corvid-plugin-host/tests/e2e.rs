@@ -45,8 +45,8 @@ fn wasm_bytes() -> Vec<u8> {
                 String::from_utf8_lossy(&output.stderr)
             );
 
-            let wasm_path = plugin_dir
-                .join("target/wasm32-unknown-unknown/release/hello_world_plugin.wasm");
+            let wasm_path =
+                plugin_dir.join("target/wasm32-unknown-unknown/release/hello_world_plugin.wasm");
 
             assert!(
                 wasm_path.exists(),
@@ -247,7 +247,10 @@ fn load_at_all_trust_tiers() {
         Ok(_) => panic!("expected signature error for Trusted tier without sig"),
         Err(e) => {
             let err = format!("{e}");
-            assert!(err.contains("signature"), "expected signature error, got: {err}");
+            assert!(
+                err.contains("signature"),
+                "expected signature error, got: {err}"
+            );
         }
     }
 }
@@ -451,16 +454,14 @@ async fn registry_call_guard_lifecycle() {
     let guard = slot.try_acquire();
     assert!(guard.is_some());
     assert_eq!(
-        slot.active_calls
-            .load(std::sync::atomic::Ordering::Acquire),
+        slot.active_calls.load(std::sync::atomic::Ordering::Acquire),
         1
     );
 
     // Drop guard — active_calls should decrement
     drop(guard);
     assert_eq!(
-        slot.active_calls
-            .load(std::sync::atomic::Ordering::Acquire),
+        slot.active_calls.load(std::sync::atomic::Ordering::Acquire),
         0
     );
 }
@@ -520,11 +521,7 @@ fn signed_plugin_loads_as_trusted() {
     let signing_key = SigningKey::from_bytes(&[42u8; 32]);
     let verifying_key = signing_key.verifying_key();
     let pubkey_hex = hex::encode(verifying_key.as_bytes());
-    std::fs::write(
-        trusted_keys_dir.join("test-publisher.pub"),
-        &pubkey_hex,
-    )
-    .unwrap();
+    std::fs::write(trusted_keys_dir.join("test-publisher.pub"), &pubkey_hex).unwrap();
 
     // Sign the WASM bytes
     let signature = signing_key.sign(&bytes);
@@ -674,10 +671,7 @@ async fn dependency_check_passes_when_satisfied() {
     let registry = PluginRegistry::new();
 
     // hello-world has no dependencies, so check should pass
-    registry
-        .check_dependencies(&loaded.manifest)
-        .await
-        .unwrap();
+    registry.check_dependencies(&loaded.manifest).await.unwrap();
 }
 
 #[tokio::test]
