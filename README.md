@@ -136,8 +136,10 @@ The agent polls for incoming messages and can forward to a hub (if configured).
 | `import` | Import wallet from mnemonic or seed |
 | `info` | Display wallet and agent details |
 | `fund` | Fund wallet from faucet (localnet) or dispenser (testnet) |
+| `balance` | Check wallet balance |
+| `history` | View transaction history |
 | `status` | Check agent, network, and hub connectivity |
-| `register` | Register agent with hub |
+| `register` | Register agent with Flock Directory |
 | `run` | Start the agent message loop |
 | `send` | Send direct message to a contact |
 | `inbox` | View and manage received messages |
@@ -346,8 +348,8 @@ RUST_LOG=info can run --data-dir ~/.corvid --hub-url http://localhost:3578
 For comprehensive guides, architecture details, and API reference, see the [full documentation](https://corvidlabs.github.io/corvid-agent-nano/):
 
 - **[Getting Started](https://corvidlabs.github.io/corvid-agent-nano/getting-started/)** — Installation, quick start, setup wizard, network configuration
-- **[Commands Reference](https://corvidlabs.github.io/corvid-agent-nano/commands/overview.html)** — Complete command documentation for all 15 subcommands
-- **[Guides](https://corvidlabs.github.io/corvid-agent-nano/guides/)** — Hub integration, contacts, groups, P2P mode, MCP integration, plugins, plugin development
+- **[Commands Reference](https://corvidlabs.github.io/corvid-agent-nano/commands/overview.html)** — Complete command documentation for all 17 subcommands
+- **[Guides](https://corvidlabs.github.io/corvid-agent-nano/guides/)** — Hub integration, contacts, groups, P2P mode, MCP integration, plugins, plugin development, deployment
 - **[Architecture](https://corvidlabs.github.io/corvid-agent-nano/architecture/)** — Security model, data storage, cryptographic details
 - **[FAQ](https://corvidlabs.github.io/corvid-agent-nano/reference/faq.html)** — Frequently asked questions and troubleshooting
 
