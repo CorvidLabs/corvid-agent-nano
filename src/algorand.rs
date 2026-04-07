@@ -268,7 +268,7 @@ impl IndexerClient for HttpIndexerClient {
         limit: Option<u32>,
     ) -> Result<Vec<NoteTransaction>> {
         let mut url = format!(
-            "{}/v2/transactions?address={}&note-prefix=AQ",
+            "{}/v2/transactions?address={}&note-prefix=AQ%3D%3D",
             self.base_url, address
         );
         if let Some(round) = after_round {
@@ -407,7 +407,7 @@ impl HttpIndexerClient {
         after_round: Option<u64>,
         limit: Option<u32>,
     ) -> Result<Vec<ChainMessage>> {
-        let mut url = format!("{}/v2/transactions?note-prefix=AQ", self.base_url);
+        let mut url = format!("{}/v2/transactions?note-prefix=AQ%3D%3D", self.base_url);
         if let Some(round) = after_round {
             url.push_str(&format!("&min-round={}", round + 1));
         }
