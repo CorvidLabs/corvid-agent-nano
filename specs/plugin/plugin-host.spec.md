@@ -64,12 +64,79 @@ The Rust sidecar binary that hosts WASM plugins for corvid-agent. Runs as a sepa
 | `PluginSlot` | `registry.rs` | Holds a plugin instance with hot-reload drain pattern |
 | `CallGuard` | `registry.rs` | RAII guard tracking active calls for drain synchronization |
 | `LoadedPlugin` | `loader.rs` | Validated plugin instance with manifest and tier |
+| `LoadError` | `loader.rs` | Error type for plugin loading failures |
 | `SandboxLimits` | `sandbox.rs` | Per-tier memory, fuel, and timeout limits |
+| `MemoryLimiter` | `sandbox.rs` | Memory constraint enforcer |
 | `InvokeContext` | `invoke.rs` | Shared backends for plugin tool invocations and event dispatch |
+| `StorageBackend` | `host_functions/storage.rs` | Pluggable key-value storage backend |
 | `AlgoBackend` | `host_functions/algo.rs` | Pluggable Algorand state query backend |
+| `AlgoQuery` | `host_functions/algo.rs` | Algorand state query request |
+| `MessageDispatch` | `host_functions/messaging.rs` | Message delivery tracker |
 | `MessagingBackend` | `host_functions/messaging.rs` | Pluggable agent message dispatch backend |
 | `DbBackend` | `host_functions/db.rs` | Pluggable read-only database query backend |
 | `FsBackend` | `host_functions/fs.rs` | Pluggable sandboxed filesystem read backend |
+| `PluginRegistry` | `registry.rs` | Centralized registry managing all loaded plugins |
+| `PluginState` | `registry.rs` | State enum for plugin lifecycle (ACTIVE, DRAINING, UNLOADED) |
+| `ToolInfo` | `invoke.rs` | Tool metadata: name, description, input schema |
+| `ListResponse` | `main.rs` | JSON-RPC list response wrapper |
+| `ToolsResponse` | `invoke.rs` | Tool list response structure |
+| `PluginToolEntry` | `invoke.rs` | Individual plugin tool entry in response |
+
+### Exported Functions
+
+| Function | File | Parameters | Returns | Description |
+|----------|------|-----------|---------|-------------|
+| `build_engine` | `engine.rs` | `cache_dir: &Path` | `Result<Engine>` | Build Wasmtime engine with AOT caching |
+| `validate_manifest` | `loader.rs` | `m: &PluginManifest` | `Result<(), LoadError>` | Validate plugin manifest |
+| `check_abi_version` | `loader.rs` | `version: u32` | `Result<()>` | Check ABI version compatibility |
+| `parse_sig_file` | `loader.rs` | `path: &Path` | `Result<(Vec<u8>, Vec<u8>)>` | Parse Ed25519 signature file |
+| `is_key_trusted` | `loader.rs` | `pubkey: &[u8]` | `bool` | Check if key is in trusted registry |
+| `verify_signature` | `loader.rs` | `pubkey, sig, data` | `Result<()>` | Verify Ed25519 signature |
+| `extract_manifest` | `loader.rs` | `wasm: &[u8]` | `Result<PluginManifest>` | Extract manifest from WASM module |
+| `load_plugin` | `loader.rs` | `path: &Path`, `tier: TrustTier` | `Result<LoadedPlugin>` | Load and validate plugin |
+| `list_plugins` | `invoke.rs` | `registry: &PluginRegistry` | `Vec<PluginManifest>` | List all loaded plugin manifests |
+| `list_tools` | `invoke.rs` | `registry: &PluginRegistry`, `plugin_id?: String` | `Vec<ToolInfo>` | List available tools |
+| `invoke_tool` | `invoke.rs` | `registry`, `plugin_id`, `tool`, `input` | async `Result<String>` | Execute plugin tool |
+| `dispatch_event` | `executor.rs` | `registry`, `event` | async | Dispatch event to subscribing plugins |
+| `dispatch_event_to_plugin` | `invoke.rs` | `plugin`, `event` | async `Result<()>` | Deliver event to single plugin |
+| `for_tier` | `sandbox.rs` | `tier: TrustTier` | `SandboxLimits` | Get limits for trust tier |
+| `is_ssrf_blocked` | `host_functions/http.rs` | `url: &str`, `allowlist: &[String]` | `bool` | Check SSRF blocklist |
+| `validate_url` | `host_functions/http.rs` | `url: &str` | `Result<()>` | Validate HTTP URL format |
+| `app_state` | `host_functions/algo.rs` | `query: &AlgoQuery` | async `Result<Value>` | Query Algorand app state |
+| `send` | `host_functions/messaging.rs` | `msg`, `target_filter` | async `Result<()>` | Send agent message |
+| `matches_target_filter` | `host_functions/messaging.rs` | `agent_id: &str`, `filter: &str` | `bool` | Test target filter match |
+| `link` | `sandbox.rs` | `linker`, `backend`, `tier` | `Result<()>` | Link host functions to WASM |
+| `read_bytes` | `wasm_mem.rs` | `store`, `ptr`, `len` | `Result<Vec<u8>>` | Read bytes from WASM memory |
+| `read_str` | `wasm_mem.rs` | `store`, `ptr`, `len` | `Result<String>` | Read string from WASM memory |
+| `write_response` | `wasm_mem.rs` | `store`, `data` | `Result<(i32, i32)>` | Write response to WASM memory |
+| `set` | `host_functions/storage.rs` | `backend`, `key`, `value` | async `Result<()>` | Set KV pair in storage |
+
+### Struct Methods
+
+#### PluginRegistry
+
+| Method | Parameters | Returns | Description |
+|--------|-----------|---------|-------------|
+| `register` | `id: String`, `slot: PluginSlot` | — | Register a loaded plugin |
+| `get` | `id: &str` | `Option<Arc<PluginSlot>>` | Get plugin by ID |
+| `reload` | `id: &str`, `plugin: LoadedPlugin` | `Result<()>` | Hot-reload a plugin |
+| `list_manifests` | `()` | `Vec<PluginManifest>` | List all loaded plugin metadata |
+| `health_status` | `()` | `StatusMap` | Get health status of all plugins |
+| `len` | `()` | `usize` | Count of loaded plugins |
+| `is_empty` | `()` | `bool` | Check if registry is empty |
+| `dispatch_event_counted` | `event: &PluginEvent` | `(u32, Vec<String>)` | Dispatch event, return count and errors |
+
+#### PluginSlot
+
+| Method | Parameters | Returns | Description |
+|--------|-----------|---------|-------------|
+| `new` | `plugin: LoadedPlugin` | `Self` | Create a new slot for a plugin |
+| `is_active` | `()` | `bool` | Check if plugin is active |
+| `is_draining` | `()` | `bool` | Check if plugin is draining |
+| `try_acquire` | `()` | `Option<CallGuard>` | Acquire a call guard (fails if draining) |
+| `drain_and_reload` | `new_plugin: LoadedPlugin` | async `Result<()>` | Hot-reload: wait for calls, swap, resume |
+| `unload` | `()` | async | Gracefully unload the plugin |
+| `state_str` | `()` | `&str` | Get human-readable state string |
 
 ## Modules
 
