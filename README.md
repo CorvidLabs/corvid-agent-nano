@@ -84,25 +84,19 @@ The interactive wizard guides you through:
 2. Wallet creation (generate new or import existing mnemonic)
 3. Password encryption for your keystore
 
-### 2. Fund your wallet
+### 2. Check balance and status
 
 ```bash
-# Localnet: automatically transfers ALGO from faucet
-can fund --data-dir ~/.corvid
+# Check ALGO balance
+can balance --data-dir ~/.corvid
 
-# Testnet: shows dispenser link
-can fund --network testnet --data-dir ~/.corvid
-```
-
-### 3. Check connectivity and status
-
-```bash
+# Full connectivity check
 can status --data-dir ~/.corvid
 ```
 
-Verifies algod, indexer, and hub reachability.
+Verifies algod, indexer, and hub reachability. For localnet, fund your account via the Algorand sandbox goal CLI.
 
-### 4. Send a message (direct messaging)
+### 3. Send a message (direct messaging)
 
 Add a contact first:
 
@@ -120,7 +114,7 @@ Then send:
 can send --to alice --message "Hello from CAN!" --data-dir ~/.corvid
 ```
 
-### 5. Run the agent
+### 4. Run the agent
 
 ```bash
 can run --data-dir ~/.corvid
@@ -135,12 +129,12 @@ The agent polls for incoming messages and can forward to a hub (if configured).
 | `setup` / `init` | Interactive wallet setup wizard |
 | `import` | Import wallet from mnemonic or seed |
 | `info` | Display wallet and agent details |
-| `fund` | Fund wallet from faucet (localnet) or dispenser (testnet) |
+| `balance` | Quick ALGO balance check |
 | `status` | Check agent, network, and hub connectivity |
-| `register` | Register agent with hub |
 | `run` | Start the agent message loop |
 | `send` | Send direct message to a contact |
 | `inbox` | View and manage received messages |
+| `history` | View message history filtered by contact |
 | `contacts` | Manage PSK-encrypted contacts |
 | `groups` | Create and manage broadcast channels |
 | `mcp` | Start MCP server for Claude Code / Cursor |
@@ -292,13 +286,7 @@ can contacts add \
   --data-dir ~/.corvid
 ```
 
-### Step 3: Register with the hub
-
-```bash
-can register --hub-url http://localhost:3578 --data-dir ~/.corvid
-```
-
-### Step 4: Run the agent with hub forwarding
+### Step 3: Run the agent with hub forwarding
 
 ```bash
 # Point --hub-url at the corvid-agent server
@@ -311,7 +299,7 @@ The agent will:
 3. Poll the hub for a response
 4. Encrypt the reply and send it back on-chain
 
-### Step 5: Test the connection
+### Step 4: Test the connection
 
 From the `can` side, verify the contact was added:
 
@@ -346,7 +334,7 @@ RUST_LOG=info can run --data-dir ~/.corvid --hub-url http://localhost:3578
 For comprehensive guides, architecture details, and API reference, see the [full documentation](https://corvidlabs.github.io/corvid-agent-nano/):
 
 - **[Getting Started](https://corvidlabs.github.io/corvid-agent-nano/getting-started/)** — Installation, quick start, setup wizard, network configuration
-- **[Commands Reference](https://corvidlabs.github.io/corvid-agent-nano/commands/overview.html)** — Complete command documentation for all 15 subcommands
+- **[Commands Reference](https://corvidlabs.github.io/corvid-agent-nano/commands/overview.html)** — Complete command documentation for all 14 subcommands
 - **[Guides](https://corvidlabs.github.io/corvid-agent-nano/guides/)** — Hub integration, contacts, groups, P2P mode, MCP integration, plugins, plugin development
 - **[Architecture](https://corvidlabs.github.io/corvid-agent-nano/architecture/)** — Security model, data storage, cryptographic details
 - **[FAQ](https://corvidlabs.github.io/corvid-agent-nano/reference/faq.html)** — Frequently asked questions and troubleshooting

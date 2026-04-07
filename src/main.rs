@@ -1,6 +1,6 @@
 //! Corvid Agent CAN — lightweight Rust AlgoChat agent.
 //!
-//! Subcommands: setup (init), import, run, send, inbox, status, contacts, groups, change-password, info, fund, register
+//! Subcommands: setup (init), import, run, send, inbox, history, balance, status, contacts, groups, change-password, info, mcp, plugin
 
 use std::fmt;
 use std::sync::Arc;
