@@ -24,6 +24,19 @@ This crate is the **semver stability boundary**. Breaking changes bump `ABI_VERS
 
 ## Public API
 
+### Exported Modules
+
+| Module | Description |
+|--------|-------------|
+| `capability` | Capability enum and related types for permission checking |
+| `context` | InitContext and ToolContext for trait method parameters |
+| `error` | PluginError enum for result handling |
+| `host_api` | Low-level WASM import signatures for host function calls |
+| `manifest` | PluginManifest struct and related types |
+| `service` | Service traits for accessing host functionality |
+| `tool` | PluginTool trait definition |
+| `kind` | EventKind enum for event subscription filtering |
+
 ### Exported Constants
 
 | Constant | Type | Value | Description |

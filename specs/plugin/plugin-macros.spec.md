@@ -1,7 +1,7 @@
 ---
 module: plugin-macros
-version: 1
-status: stable
+version: 2
+status: active
 files:
   - crates/corvid-plugin-macros/src/lib.rs
 depends_on:
@@ -16,12 +16,12 @@ Proc-macro crate (`proc-macro = true`) that generates WASM export glue for plugi
 
 ## Public API
 
-### Exported Macros
+### Exported Functions (Macros)
 
-| Macro | Kind | Description |
-|-------|------|-------------|
-| `#[corvid_plugin]` | Attribute macro | Applied to a struct that implements `CorvidPlugin`. Generates all WASM export functions |
-| `#[corvid_tool]` | Attribute macro | Applied to a struct to generate `PluginTool` trait implementation from annotations |
+| Function | Kind | Description |
+|----------|------|-------------|
+| `corvid_plugin` | Attribute macro | Applied to a struct that implements `CorvidPlugin`. Generates all WASM export functions |
+| `corvid_tool` | Attribute macro | Applied to a struct to generate `PluginTool` trait implementation from annotations |
 
 ### Generated WASM Exports
 
@@ -126,5 +126,4 @@ None — this is a proc-macro crate with no runtime configuration.
 | Date | Author | Change |
 |------|--------|--------|
 | 2026-03-28 | CorvidAgent | Initial spec from council synthesis (Issue #15) |
-| 2026-04-06 | CorvidAgent | Updated to spec-sync v3.3.0 format — status: active → stable |
 | 2026-03-28 | CorvidAgent | Promoted to active — updated export names (`__corvid_*`), signatures (`i64` packed returns), payload formats, added `#[corvid_tool]` macro, `__corvid_alloc`/`__corvid_dealloc`, removed unimplemented `catch_unwind` claim |
