@@ -1469,11 +1469,7 @@ async fn cmd_status(
             |r| r.get(0),
         )?;
         let last_ts: Option<i64> = conn
-            .query_row(
-                "SELECT MAX(timestamp_secs) FROM messages",
-                [],
-                |r| r.get(0),
-            )
+            .query_row("SELECT MAX(timestamp_secs) FROM messages", [], |r| r.get(0))
             .ok()
             .flatten();
         let last_str = if let Some(ts) = last_ts {
@@ -2012,9 +2008,7 @@ async fn main() -> Result<()> {
                 .init();
         }
         LogFormat::Text => {
-            tracing_subscriber::fmt()
-                .with_env_filter(env_filter)
-                .init();
+            tracing_subscriber::fmt().with_env_filter(env_filter).init();
         }
     }
 
@@ -2124,7 +2118,16 @@ async fn main() -> Result<()> {
             address,
             password,
         } => {
-            cmd_balance(network, algod_url, algod_token, seed, address, password, data_dir).await
+            cmd_balance(
+                network,
+                algod_url,
+                algod_token,
+                seed,
+                address,
+                password,
+                data_dir,
+            )
+            .await
         }
 
         Command::Contacts { action } => cmd_contacts(action, data_dir),
