@@ -10,31 +10,17 @@ pub enum Event {
     /// A new message was received from a transport.
     MessageReceived(Message),
     /// An outgoing message was confirmed sent.
-    MessageSent {
-        to: String,
-        tx_id: String,
-    },
+    MessageSent { to: String, tx_id: String },
     /// A contact was added.
-    ContactAdded {
-        address: String,
-        name: String,
-    },
+    ContactAdded { address: String, name: String },
     /// A contact was removed.
-    ContactRemoved {
-        address: String,
-    },
+    ContactRemoved { address: String },
     /// A plugin was loaded.
-    PluginLoaded {
-        name: String,
-    },
+    PluginLoaded { name: String },
     /// A plugin was unloaded.
-    PluginUnloaded {
-        name: String,
-    },
+    PluginUnloaded { name: String },
     /// Scheduled tick (for polling plugins).
-    Timer {
-        timestamp: DateTime<Utc>,
-    },
+    Timer { timestamp: DateTime<Utc> },
     /// Graceful shutdown starting.
     Shutdown,
     /// Plugin-defined custom event.

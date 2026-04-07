@@ -198,20 +198,15 @@ impl Runtime {
             }
             Action::EmitEvent { kind, data } => {
                 debug!(plugin = %plugin_name, kind = %kind, "executing EmitEvent");
-                let _ = self
-                    .event_tx
-                    .send(Event::Custom { kind, data })
-                    .await;
+                let _ = self.event_tx.send(Event::Custom { kind, data }).await;
             }
-            Action::Log { level, message } => {
-                match level {
-                    LogLevel::Trace => tracing::trace!(plugin = %plugin_name, "{}", message),
-                    LogLevel::Debug => tracing::debug!(plugin = %plugin_name, "{}", message),
-                    LogLevel::Info => tracing::info!(plugin = %plugin_name, "{}", message),
-                    LogLevel::Warn => tracing::warn!(plugin = %plugin_name, "{}", message),
-                    LogLevel::Error => tracing::error!(plugin = %plugin_name, "{}", message),
-                }
-            }
+            Action::Log { level, message } => match level {
+                LogLevel::Trace => tracing::trace!(plugin = %plugin_name, "{}", message),
+                LogLevel::Debug => tracing::debug!(plugin = %plugin_name, "{}", message),
+                LogLevel::Info => tracing::info!(plugin = %plugin_name, "{}", message),
+                LogLevel::Warn => tracing::warn!(plugin = %plugin_name, "{}", message),
+                LogLevel::Error => tracing::error!(plugin = %plugin_name, "{}", message),
+            },
         }
         Ok(())
     }
@@ -269,10 +264,7 @@ mod tests {
         async fn handle_event(&self, event: &Event, _ctx: &PluginContext) -> Result<Vec<Action>> {
             match event {
                 Event::MessageReceived(msg) => {
-                    self.received
-                        .lock()
-                        .unwrap()
-                        .push(msg.content.clone());
+                    self.received.lock().unwrap().push(msg.content.clone());
                     Ok(vec![Action::SendMessage {
                         to: msg.sender.clone(),
                         content: format!("echo: {}", msg.content),
@@ -351,9 +343,7 @@ mod tests {
             metadata: serde_json::Value::Null,
         };
 
-        runtime
-            .dispatch_event(&Event::MessageReceived(msg))
-            .await;
+        runtime.dispatch_event(&Event::MessageReceived(msg)).await;
 
         let r = received.lock().unwrap();
         assert_eq!(r.len(), 1);

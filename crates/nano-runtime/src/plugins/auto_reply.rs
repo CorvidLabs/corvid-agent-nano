@@ -145,7 +145,10 @@ mod tests {
     #[tokio::test]
     async fn matches_ping_pong() {
         let plugin = AutoReplyPlugin::with_rules(vec![("ping".into(), "pong".into())]);
-        let actions = plugin.handle_event(&make_msg("ping"), &test_ctx()).await.unwrap();
+        let actions = plugin
+            .handle_event(&make_msg("ping"), &test_ctx())
+            .await
+            .unwrap();
         assert_eq!(actions.len(), 1);
         match &actions[0] {
             Action::SendMessage { to, content } => {

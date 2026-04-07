@@ -33,10 +33,7 @@ impl StateStore {
 
     /// Get a snapshot of a plugin's entire namespace.
     pub fn snapshot(&self, plugin: &str) -> HashMap<String, Value> {
-        self.namespaces
-            .get(plugin)
-            .cloned()
-            .unwrap_or_default()
+        self.namespaces.get(plugin).cloned().unwrap_or_default()
     }
 
     /// Remove a value from a plugin's namespace.

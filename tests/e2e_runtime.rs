@@ -98,11 +98,7 @@ impl Plugin for CounterPlugin {
     async fn handle_event(&self, event: &Event, ctx: &PluginContext) -> Result<Vec<Action>> {
         match event {
             Event::MessageReceived(_) => {
-                let count = ctx
-                    .state
-                    .get("count")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
+                let count = ctx.state.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
                 Ok(vec![Action::StoreState {
                     key: "count".into(),
                     value: serde_json::json!(count + 1),
@@ -287,9 +283,7 @@ async fn multiple_plugins_all_receive_same_message() {
     // Recorder should have seen the MessageReceived event
     let all_events = events.lock().unwrap();
     assert!(
-        all_events
-            .iter()
-            .any(|e| *e == EventKind::MessageReceived),
+        all_events.iter().any(|e| *e == EventKind::MessageReceived),
         "recorder should see MessageReceived"
     );
 }
@@ -359,8 +353,7 @@ async fn event_sender_injects_events_into_runtime_loop() {
 
     let sent = transport_check.sent_messages();
     assert!(
-        sent.iter()
-            .any(|m| m.content == "echo: injected message"),
+        sent.iter().any(|m| m.content == "echo: injected message"),
         "echo plugin should process event-bus injected messages"
     );
 }
@@ -426,10 +419,7 @@ async fn auto_reply_plugin_responds_to_matching_messages() {
     rule2.insert("reply".into(), toml::Value::String("online".into()));
     reply_config.insert(
         "rules".into(),
-        toml::Value::Array(vec![
-            toml::Value::Table(rule1),
-            toml::Value::Table(rule2),
-        ]),
+        toml::Value::Array(vec![toml::Value::Table(rule1), toml::Value::Table(rule2)]),
     );
     config
         .plugin_configs
@@ -459,8 +449,7 @@ async fn auto_reply_plugin_responds_to_matching_messages() {
     let sent = transport_check.sent_messages();
     // "ping" → "pong" to alice
     assert!(
-        sent.iter()
-            .any(|m| m.to == "alice" && m.content == "pong"),
+        sent.iter().any(|m| m.to == "alice" && m.content == "pong"),
         "should reply pong to alice's ping: {:?}",
         sent
     );

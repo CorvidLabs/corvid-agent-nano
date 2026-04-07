@@ -58,10 +58,7 @@ async fn plugin_receives_config_from_runtime() {
 
     let mut plugin_configs = HashMap::new();
     let mut greeter_config = toml::Table::new();
-    greeter_config.insert(
-        "greeting".into(),
-        toml::Value::String("ahoy!".into()),
-    );
+    greeter_config.insert("greeting".into(), toml::Value::String("ahoy!".into()));
     plugin_configs.insert("greeter".into(), greeter_config);
 
     let config = RuntimeConfig {
@@ -71,7 +68,10 @@ async fn plugin_receives_config_from_runtime() {
     };
 
     let mut runtime = Runtime::new(transport.clone(), config);
-    runtime.add_plugin(Box::new(GreeterPlugin::new())).await.unwrap();
+    runtime
+        .add_plugin(Box::new(GreeterPlugin::new()))
+        .await
+        .unwrap();
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
@@ -102,7 +102,10 @@ async fn plugin_uses_default_without_config() {
     };
 
     let mut runtime = Runtime::new(transport.clone(), config);
-    runtime.add_plugin(Box::new(GreeterPlugin::new())).await.unwrap();
+    runtime
+        .add_plugin(Box::new(GreeterPlugin::new()))
+        .await
+        .unwrap();
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
@@ -178,41 +181,21 @@ level = "debug"
 
     let runtime = parsed.get("runtime").unwrap();
     assert_eq!(runtime.get("poll_interval").unwrap().as_integer(), Some(2));
-    assert_eq!(
-        runtime.get("health_port").unwrap().as_integer(),
-        Some(8080)
-    );
+    assert_eq!(runtime.get("health_port").unwrap().as_integer(), Some(8080));
 
     let plugins = parsed.get("plugins").unwrap();
-    assert_eq!(
-        plugins
-            .get("enabled")
-            .unwrap()
-            .as_array()
-            .unwrap()
-            .len(),
-        2
-    );
+    assert_eq!(plugins.get("enabled").unwrap().as_array().unwrap().len(), 2);
 
     // Verify auto-reply rules parse
     let auto_reply = plugins.get("auto-reply").unwrap();
     let rules = auto_reply.get("rules").unwrap().as_array().unwrap();
     assert_eq!(rules.len(), 2);
-    assert_eq!(
-        rules[0].get("match").unwrap().as_str(),
-        Some("ping")
-    );
-    assert_eq!(
-        rules[0].get("reply").unwrap().as_str(),
-        Some("pong")
-    );
+    assert_eq!(rules[0].get("match").unwrap().as_str(), Some("ping"));
+    assert_eq!(rules[0].get("reply").unwrap().as_str(), Some("pong"));
 
     // Verify greeter config
     let greeter = plugins.get("greeter").unwrap();
-    assert_eq!(
-        greeter.get("greeting").unwrap().as_str(),
-        Some("welcome!")
-    );
+    assert_eq!(greeter.get("greeting").unwrap().as_str(), Some("welcome!"));
 }
 
 #[test]
@@ -224,12 +207,7 @@ name = "minimal"
 
     let parsed: toml::Value = toml::from_str(toml_content).unwrap();
     assert_eq!(
-        parsed
-            .get("agent")
-            .unwrap()
-            .get("name")
-            .unwrap()
-            .as_str(),
+        parsed.get("agent").unwrap().get("name").unwrap().as_str(),
         Some("minimal")
     );
     // Other sections should be absent (defaults applied at runtime)

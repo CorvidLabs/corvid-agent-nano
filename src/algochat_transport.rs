@@ -10,7 +10,12 @@ use nano_transport::{Message, OutboundMessage, SendResult, Transport};
 use tracing::info;
 
 /// AlgoChat transport — polls for encrypted messages on Algorand and sends replies.
-pub struct AlgoChatTransport<A: AlgodClient, I: IndexerClient, S: EncryptionKeyStorage, M: MessageCache> {
+pub struct AlgoChatTransport<
+    A: AlgodClient,
+    I: IndexerClient,
+    S: EncryptionKeyStorage,
+    M: MessageCache,
+> {
     client: Arc<AlgoChat<A, I, S, M>>,
     algod: Arc<A>,
     address: String,

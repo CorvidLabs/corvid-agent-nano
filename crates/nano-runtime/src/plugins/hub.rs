@@ -53,11 +53,7 @@ impl HubPlugin {
     }
 
     /// Forward a message to the hub and poll for a response.
-    async fn forward_and_get_response(
-        &self,
-        sender: &str,
-        content: &str,
-    ) -> Option<String> {
+    async fn forward_and_get_response(&self, sender: &str, content: &str) -> Option<String> {
         let url = format!("{}/a2a/tasks/send", self.hub_url.trim_end_matches('/'));
         let payload = HubTaskRequest {
             message: format!("[AlgoChat from {}] {}", sender, content),
@@ -66,18 +62,16 @@ impl HubPlugin {
 
         // Step 1: Forward to hub
         let task_id = match self.http.post(&url).json(&payload).send().await {
-            Ok(resp) if resp.status().is_success() => {
-                match resp.json::<HubTaskResponse>().await {
-                    Ok(task) => {
-                        info!(task_id = %task.id, "forwarded message to hub");
-                        task.id
-                    }
-                    Err(e) => {
-                        warn!(error = %e, "hub response parse failed");
-                        return None;
-                    }
+            Ok(resp) if resp.status().is_success() => match resp.json::<HubTaskResponse>().await {
+                Ok(task) => {
+                    info!(task_id = %task.id, "forwarded message to hub");
+                    task.id
                 }
-            }
+                Err(e) => {
+                    warn!(error = %e, "hub response parse failed");
+                    return None;
+                }
+            },
             Ok(resp) => {
                 warn!(status = %resp.status(), "hub rejected message");
                 return None;
@@ -145,7 +139,10 @@ impl Plugin for HubPlugin {
     async fn handle_event(&self, event: &Event, _ctx: &PluginContext) -> Result<Vec<Action>> {
         match event {
             Event::MessageReceived(msg) => {
-                match self.forward_and_get_response(&msg.sender, &msg.content).await {
+                match self
+                    .forward_and_get_response(&msg.sender, &msg.content)
+                    .await
+                {
                     Some(response) => Ok(vec![Action::SendMessage {
                         to: msg.sender.clone(),
                         content: response,

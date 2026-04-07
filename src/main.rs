@@ -1123,9 +1123,9 @@ async fn cmd_run(
         // Load built-in plugins
         if !no_hub {
             runtime
-                .add_plugin(Box::new(
-                    nano_runtime::plugins::hub::HubPlugin::new(&hub_url),
-                ))
+                .add_plugin(Box::new(nano_runtime::plugins::hub::HubPlugin::new(
+                    &hub_url,
+                )))
                 .await?;
         }
 

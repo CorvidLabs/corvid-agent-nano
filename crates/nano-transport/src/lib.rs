@@ -104,8 +104,7 @@ impl MockTransport {
 
     /// Get the number of messages sent through this transport.
     pub fn send_count(&self) -> u64 {
-        self.send_counter
-            .load(std::sync::atomic::Ordering::SeqCst)
+        self.send_counter.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Clear captured outbound messages.

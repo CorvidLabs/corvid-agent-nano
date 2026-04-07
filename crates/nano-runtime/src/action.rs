@@ -9,10 +9,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Action {
     /// Send a message through the transport.
-    SendMessage {
-        to: String,
-        content: String,
-    },
+    SendMessage { to: String, content: String },
     /// Persist a key-value pair in the plugin's scoped state.
     StoreState {
         key: String,
@@ -24,10 +21,7 @@ pub enum Action {
         data: serde_json::Value,
     },
     /// Structured log entry.
-    Log {
-        level: LogLevel,
-        message: String,
-    },
+    Log { level: LogLevel, message: String },
 }
 
 /// Log levels for plugin log actions.
