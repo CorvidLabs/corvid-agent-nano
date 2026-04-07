@@ -26,6 +26,7 @@
 - [info](./commands/info.md)
 - [change-password](./commands/change-password.md)
 - [plugin](./commands/plugin.md)
+- [config](./commands/config.md)
 
 # Guides
 
@@ -36,6 +37,7 @@
 - [Plugins (WASM)](./guides/plugins.md)
 - [Plugin Development](./guides/plugin-development.md)
 - [MCP Integration](./guides/mcp-integration.md)
+- [Demo Walkthrough](./guides/demo-walkthrough.md)
 
 # Architecture
 

@@ -347,7 +347,9 @@ RUST_LOG=info can run --data-dir ~/.corvid --hub-url http://localhost:3578
 
 For comprehensive guides, architecture details, and API reference, see the [full documentation](https://corvidlabs.github.io/corvid-agent-nano/):
 
-- **[Getting Started](https://corvidlabs.github.io/corvid-agent-nano/getting-started/)** — Installation, quick start, setup wizard, network configuration
+- **[Getting Started Guide](GETTING_STARTED.md)** — Complete walkthrough from install to first message
+- **[Demo Guide](DEMO.md)** — 10 demo scenarios with step-by-step examples
+- **[Getting Started (web)](https://corvidlabs.github.io/corvid-agent-nano/getting-started/)** — Installation, quick start, setup wizard, network configuration
 - **[Commands Reference](https://corvidlabs.github.io/corvid-agent-nano/commands/overview.html)** — Complete command documentation for all 16 subcommands
 - **[Guides](https://corvidlabs.github.io/corvid-agent-nano/guides/)** — Hub integration, contacts, groups, P2P mode, MCP integration, plugins, plugin development
 - **[Architecture](https://corvidlabs.github.io/corvid-agent-nano/architecture/)** — Security model, data storage, cryptographic details
