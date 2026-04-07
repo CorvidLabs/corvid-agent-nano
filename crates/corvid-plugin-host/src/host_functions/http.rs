@@ -21,10 +21,15 @@ pub fn validate_url(url: &str, allowlist: &[String]) -> bool {
         None => return false,
     };
 
-    // Check against allowlist
-    allowlist
-        .iter()
-        .any(|allowed| host == *allowed || host.ends_with(&format!(".{allowed}")))
+    // Check against allowlist.
+    //
+    // Subdomain matching is only applied when the allowlist entry itself
+    // contains at least one dot (e.g. "example.com").  This prevents a bare
+    // TLD entry such as "com" from accidentally matching every ".com" domain.
+    allowlist.iter().any(|allowed| {
+        host == *allowed
+            || (allowed.contains('.') && host.ends_with(&format!(".{allowed}")))
+    })
 }
 
 fn extract_host_from_url(url: &str) -> Option<String> {
@@ -196,5 +201,23 @@ mod tests {
     #[test]
     fn empty_allowlist_blocks_all() {
         assert!(!validate_url("https://example.com/", &[]));
+    }
+
+    #[test]
+    fn bare_tld_in_allowlist_does_not_match_all_subdomains() {
+        // A single-label entry like "com" must NOT act as a wildcard for all
+        // .com domains — it should only match the exact hostname "com".
+        let list = vec!["com".into()];
+        assert!(!validate_url("https://evil.com/steal", &list));
+        assert!(!validate_url("https://attacker.com/", &list));
+    }
+
+    #[test]
+    fn allowlist_requires_dot_for_subdomain_match() {
+        // Confirm that a proper multi-label entry still allows subdomains
+        let list = vec!["example.com".into()];
+        assert!(validate_url("https://api.example.com/v1", &list));
+        // but a non-matching domain is still blocked
+        assert!(!validate_url("https://notexample.com/", &list));
     }
 }
