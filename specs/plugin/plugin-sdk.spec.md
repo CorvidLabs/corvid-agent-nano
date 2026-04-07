@@ -24,6 +24,32 @@ This crate is the **semver stability boundary**. Breaking changes bump `ABI_VERS
 
 ## Public API
 
+### Exported Modules
+
+| Module | Description |
+|--------|-------------|
+| `capability` | Capability enum and related types for permission checking |
+| `context` | InitContext and ToolContext for trait method parameters |
+| `error` | PluginError enum for result handling |
+| `host_api` | Low-level WASM import signatures for host function calls |
+| `manifest` | PluginManifest struct and related types |
+| `service` | Service traits for accessing host functionality |
+| `tool` | PluginTool trait definition |
+| `kind` | EventKind enum for event subscription filtering |
+
+### Exported Functions (Host API)
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `host_kv_get` | `extern "C" fn(key_ptr: i32, key_len: i32) -> i32` | Scoped KV read (WASM import) |
+| `host_kv_set` | `extern "C" fn(key_ptr: i32, key_len: i32, val_ptr: i32, val_len: i32) -> i32` | Scoped KV write (WASM import) |
+| `host_http_get` | `extern "C" fn(url_ptr: i32, url_len: i32) -> i32` | Allowlisted HTTP GET (WASM import) |
+| `host_http_post` | `extern "C" fn(url_ptr: i32, url_len: i32, body_ptr: i32, body_len: i32) -> i32` | Allowlisted HTTP POST (WASM import) |
+| `host_db_query` | `extern "C" fn(sql_ptr: i32, sql_len: i32) -> i32` | Read-only SQL query (WASM import) |
+| `host_fs_read` | `extern "C" fn(path_ptr: i32, path_len: i32) -> i32` | Sandboxed file read (WASM import) |
+| `host_algo_state` | `extern "C" fn(account_ptr: i32, account_len: i32) -> i32` | Algorand account state read (WASM import) |
+| `host_send_message` | `extern "C" fn(target_ptr: i32, target_len: i32, msg_ptr: i32, msg_len: i32) -> i32` | Send agent message (WASM import) |
+
 ### Exported Constants
 
 | Constant | Type | Value | Description |
@@ -139,18 +165,6 @@ This crate is the **semver stability boundary**. Breaking changes bump `ABI_VERS
 | `Timeout` | Execution exceeded wall-clock limit |
 | `Unavailable` | Plugin is draining (hot-reload in progress) |
 
-### Host API Functions (WASM imports)
-
-| Function | Signature | Description |
-|----------|-----------|-------------|
-| `host_kv_get` | `extern "C" fn(key_ptr: i32, key_len: i32) -> i32` | Scoped KV read |
-| `host_kv_set` | `extern "C" fn(key_ptr: i32, key_len: i32, val_ptr: i32, val_len: i32) -> i32` | Scoped KV write |
-| `host_http_get` | `extern "C" fn(url_ptr: i32, url_len: i32) -> i32` | Allowlisted HTTP GET |
-| `host_http_post` | `extern "C" fn(url_ptr: i32, url_len: i32, body_ptr: i32, body_len: i32) -> i32` | Allowlisted HTTP POST |
-| `host_db_query` | `extern "C" fn(sql_ptr: i32, sql_len: i32) -> i32` | Read-only SQL query |
-| `host_fs_read` | `extern "C" fn(path_ptr: i32, path_len: i32) -> i32` | Sandboxed file read |
-| `host_algo_state` | `extern "C" fn(app_id: i64, key_ptr: i32, key_len: i32) -> i32` | Algorand app state read |
-| `host_send_message` | `extern "C" fn(target_ptr: i32, target_len: i32, msg_ptr: i32, msg_len: i32) -> i32` | Agent message send |
 
 All host functions use MessagePack serialization across the WASM boundary. Return values are pointers to MessagePack-encoded response buffers in WASM linear memory.
 
