@@ -6,25 +6,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-04-06
+
 ### Added
 
-- **MCP server mode** (`can mcp` command) — Start corvid-agent-nano as a JSON-RPC 2.0 MCP server for Claude Code, Cursor, and other MCP-compatible clients
+- **Balance command** (`can balance`) — Quick ALGO balance check without running full status
+- **History command** (`can history`) — View message history filtered by contact (alias for inbox with `--contact`)
+- **Fund command** (`can fund`) — Fund agent wallet from localnet faucet or testnet dispenser link
+- **Register command** (`can register`) — Register agent with Flock Directory for peer discovery
+- **MCP server mode** (`can mcp`) — Start as a JSON-RPC 2.0 MCP server for Claude Code, Cursor, and other MCP-compatible clients
   - Exposes 5 tools: `agent_info`, `list_contacts`, `get_inbox`, `check_balance`, `send_message`
-  - Support for `--network`, `--password`, and `--seed` options
   - Comprehensive MCP integration guide with Claude Code and Cursor setup instructions
-- **MCP documentation** — New guide for MCP client configuration and IDE integration
+- **Health check endpoint** — HTTP health check for Docker/systemd monitoring (`--health-port`)
+- **JSON logging** — Structured JSON log output for log aggregation (`--log-format json`)
+- **Plugin dependency graph** — Plugins can declare dependencies; host resolves load order
+- **Plugin host functions** — `DbRead` and `FsProjectDir` host functions for plugin data access
+- **Plugin tool discovery** — Automatic discovery of tools exposed by loaded plugins
+- **Plugin hot-reload notifications** — Push notifications when plugins are updated
+- **Enhanced status output** — Status command now shows balance, contact count, and plugin health
 
 ### Security
 
-- **SSRF bypass fixes** (critical) — Blocked IPv6-mapped IPv4 addresses (`::ffff:*`), IPv6 link-local (`fe80::/10`), and ULA lower range (`fc00::/8`)
-- **Wall-clock timeout enforcement** — Plugin host now enforces actual time limits, not just fuel/instruction limits
-- **Socket buffer bounds** — Capped incoming message buffer at 64 MiB to prevent heap exhaustion
+- **Path traversal fix** (critical) — Blocked `../` in plugin IDs and file paths
+- **SSRF bypass fixes** (critical) — Blocked IPv6-mapped IPv4 (`::ffff:*`), link-local (`fe80::/10`), and ULA (`fc00::/8`) addresses
+- **Wall-clock timeout enforcement** — Plugin host enforces actual time limits, not just fuel/instruction limits
+- **Socket permissions** — Plugin bridge socket restricted to owner-only access
+- **Request size limits** — Capped incoming plugin bridge messages at 64 MiB
 - **Input validation hardening** — Route parameter validation (`PLUGIN_ID_RE`, `TOOL_NAME_RE`) and JSON parse error reporting
+- **Plugin bridge hardening** — REST invoke route validation and sandboxing improvements
 
 ### Changed
 
-- **Commands section expanded** — Added 15th command: `mcp` (was 14 previously)
-- **Guides section expanded** — Added MCP integration guide (was 6 guides previously)
+- **16 CLI commands** — Added `balance`, `history`, `fund`, `register` (was 12 in v0.1.0)
+- **Wire type normalization** — Standardized plugin bridge JSON-RPC wire types
+- **spec-sync upgraded to v3.3.0** — Improved spec validation and sync tooling
 
 ## [0.1.0] - 2026-03-29
 

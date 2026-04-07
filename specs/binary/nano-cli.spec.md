@@ -1,6 +1,6 @@
 ---
 module: nano-cli
-version: 7
+version: 8
 status: stable
 files:
   - src/main.rs
@@ -40,20 +40,53 @@ Binary entry point for corvid-agent-nano. Parses CLI arguments, initializes cryp
 | `send_note_transaction` | `algod`, `sender`, `receiver`, `note`, `signing_key` | `Result<String>` | Build, sign, and submit a 0-ALGO payment transaction |
 | `decode_address` | `address: &str` | `Result<[u8; 32]>` | Decode Algorand address to 32 raw bytes |
 
-### CLI Arguments (clap)
+### CLI Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `setup` / `init` | Interactive wallet setup wizard |
+| `import` | Import wallet from mnemonic or seed |
+| `run` | Start the agent message loop |
+| `send` | Send direct message to a contact or group |
+| `inbox` | View and manage received messages |
+| `history` | View message history filtered by contact (alias for inbox with --contact) |
+| `balance` | Quick ALGO balance check |
+| `status` | Check agent, network, and hub connectivity |
+| `contacts` | Manage PSK-encrypted contacts (add, list, remove, export, import) |
+| `groups` | Manage group PSK channels (create, add-member, remove-member, show, list) |
+| `change-password` | Rotate keystore encryption password |
+| `info` | Display wallet and agent details |
+| `fund` | Fund wallet from faucet (localnet) or dispenser (testnet) |
+| `register` | Register agent with Flock Directory for peer discovery |
+| `mcp` | Start MCP server for Claude Code / Cursor integration |
+| `plugin` | List, invoke, and manage WASM plugins |
+
+### Global CLI Arguments (clap)
 
 | Flag | Type | Default | Env Var | Description |
 |------|------|---------|---------|-------------|
-| `--algod-url` | `String` | `http://localhost:4001` | — | Algorand node REST API URL |
-| `--algod-token` | `String` | `aaa...aaa` (64 a's) | — | Algorand node API token |
-| `--indexer-url` | `String` | `http://localhost:8980` | — | Algorand indexer REST API URL |
-| `--indexer-token` | `String` | `aaa...aaa` (64 a's) | — | Algorand indexer API token |
-| `--seed` | `String` | (required) | `NANO_SEED` | Hex-encoded 32-byte Ed25519 private key |
-| `--address` | `String` | (required) | `NANO_ADDRESS` | Agent's Algorand address |
-| `--name` | `String` | `nano` | — | Agent name for discovery and display |
-| `--hub-url` | `String` | `http://localhost:3578` | — | corvid-agent hub API URL |
 | `--data-dir` | `String` | `./data` | — | Data directory for persistent SQLite storage |
+| `--log-format` | `text\|json` | `text` | — | Log output format |
+| `--log-level` | `String` | `info` | `RUST_LOG` | Log level override |
+
+### Run Command Arguments
+
+| Flag | Type | Default | Env Var | Description |
+|------|------|---------|---------|-------------|
+| `--network` | `Network` | `localnet` | `CAN_NETWORK` | Algorand network preset |
+| `--algod-url` | `String` | (from preset) | `CAN_ALGOD_URL` | Algorand node REST API URL |
+| `--algod-token` | `String` | (from preset) | `CAN_ALGOD_TOKEN` | Algorand node API token |
+| `--indexer-url` | `String` | (from preset) | `CAN_INDEXER_URL` | Algorand indexer REST API URL |
+| `--indexer-token` | `String` | (from preset) | `CAN_INDEXER_TOKEN` | Algorand indexer API token |
+| `--seed` | `String` | (from keystore) | `CAN_SEED` | Hex-encoded 32-byte Ed25519 private key |
+| `--address` | `String` | (from keystore) | `CAN_ADDRESS` | Agent's Algorand address |
+| `--password` | `String` | (interactive) | `CAN_PASSWORD` | Keystore password |
+| `--name` | `String` | `can` | — | Agent name for discovery and display |
+| `--hub-url` | `String` | `http://localhost:3578` | — | corvid-agent hub API URL |
 | `--poll-interval` | `u64` | `5` | — | Message poll interval in seconds |
+| `--no-plugins` | `bool` | `false` | — | Disable the plugin host sidecar |
+| `--no-hub` | `bool` | `false` | — | Run in direct P2P mode (no hub forwarding) |
+| `--health-port` | `u16` | (disabled) | `CAN_HEALTH_PORT` | Enable health check HTTP endpoint on this port |
 
 ### Source Modules
 
@@ -235,3 +268,4 @@ None — this is the binary entry point.
 | 2026-03-28 | CorvidAgent | v4: SQLite persistence — replace in-memory storage with SqliteKeyStorage/SqliteMessageCache, add --data-dir flag |
 | 2026-03-28 | CorvidAgent | v5: Add Exported Structs/Functions sections for spec-sync strict compliance |
 | 2026-03-28 | CorvidAgent | v6: Bidirectional messaging — hub response polling, encrypted on-chain replies, PSK/X25519 encryption, transaction building |
+| 2026-04-06 | CorvidAgent | v7→8: Update CLI subcommands table to reflect all 16 commands (balance, history, fund, register, mcp, plugin added) |
