@@ -39,7 +39,6 @@ pub async fn send_note_transaction(
 /// Creates a payment transaction for the given amount (in microAlgos).
 /// Fields are written in strict alphabetical order as required by Algorand.
 /// If amount is 0, the `amt` field is omitted.
-#[allow(dead_code)]
 pub fn build_payment_transaction_with_amount(
     sender: &str,
     receiver: &str,
