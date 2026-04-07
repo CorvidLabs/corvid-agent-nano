@@ -1195,7 +1195,10 @@ async fn cmd_run(
             }
         });
         info!(port = port, "A2A server listening on :{}", port);
-        println!("  A2A:      http://localhost:{}/.well-known/agent.json", port);
+        println!(
+            "  A2A:      http://localhost:{}/.well-known/agent.json",
+            port
+        );
     }
 
     if use_runtime {
@@ -2808,10 +2811,7 @@ async fn cmd_serve(
     ui::field("Network:", &network.to_string());
     ui::field("Address:", &agent_address);
     ui::field("Port:", &port.to_string());
-    ui::field(
-        "Hub:",
-        hub_url.as_deref().unwrap_or("disabled (P2P mode)"),
-    );
+    ui::field("Hub:", hub_url.as_deref().unwrap_or("disabled (P2P mode)"));
     ui::field(
         "Auth:",
         if psk.is_some() {
@@ -3166,7 +3166,10 @@ async fn main() -> Result<()> {
             address,
             password,
         } => {
-            cmd_serve(port, name, network, hub_url, psk, seed, address, password, data_dir).await
+            cmd_serve(
+                port, name, network, hub_url, psk, seed, address, password, data_dir,
+            )
+            .await
         }
     }
 }

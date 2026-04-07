@@ -278,8 +278,7 @@ pub async fn serve_a2a(config: A2aServerConfig) -> anyhow::Result<()> {
 
                 // Agent card is public (allows discovery)
                 if !authenticated && path != "/.well-known/agent.json" {
-                    let _ =
-                        write_response(&mut stream, 401, r#"{"error":"unauthorized"}"#).await;
+                    let _ = write_response(&mut stream, 401, r#"{"error":"unauthorized"}"#).await;
                     return;
                 }
             }
@@ -568,7 +567,9 @@ async fn forward_to_hub_and_poll(
 
         match status.state.as_str() {
             "completed" => {
-                return status.response.ok_or_else(|| "hub returned completed with no response".to_string());
+                return status
+                    .response
+                    .ok_or_else(|| "hub returned completed with no response".to_string());
             }
             "failed" | "cancelled" => {
                 return Err(format!("hub task {}", status.state));
@@ -587,8 +588,11 @@ async fn forward_to_hub_and_poll(
 // HTTP helpers
 // ---------------------------------------------------------------------------
 
+/// Parsed HTTP request: (method, path, headers, body).
+type HttpRequest = (String, String, Vec<(String, String)>, String);
+
 /// Parse a raw HTTP request into (method, path, headers, body).
-fn parse_http_request(raw: &str) -> Option<(String, String, Vec<(String, String)>, String)> {
+fn parse_http_request(raw: &str) -> Option<HttpRequest> {
     let mut lines = raw.lines();
 
     // Request line: "GET /path HTTP/1.1"
@@ -652,7 +656,10 @@ async fn write_response(
     let cors = "Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, DELETE, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization";
 
     let response = if status == 204 {
-        format!("HTTP/1.1 {} {}\r\n{}\r\nConnection: close\r\n\r\n", status, status_text, cors)
+        format!(
+            "HTTP/1.1 {} {}\r\n{}\r\nConnection: close\r\n\r\n",
+            status, status_text, cors
+        )
     } else {
         format!(
             "HTTP/1.1 {} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n{}\r\nConnection: close\r\n\r\n{}",
@@ -882,7 +889,16 @@ mod tests {
         let http = Client::new();
         let card = r#"{"name":"test"}"#;
 
-        let (status, body) = route("GET", "/.well-known/agent.json", "", card, &store, &http, None).await;
+        let (status, body) = route(
+            "GET",
+            "/.well-known/agent.json",
+            "",
+            card,
+            &store,
+            &http,
+            None,
+        )
+        .await;
         assert_eq!(status, 200);
         assert_eq!(body, card);
     }
@@ -941,7 +957,16 @@ mod tests {
         let store = Arc::new(RwLock::new(TaskStore::new(10)));
         let http = Client::new();
 
-        let (status, _) = route("GET", "/a2a/tasks/nonexistent", "", "{}", &store, &http, None).await;
+        let (status, _) = route(
+            "GET",
+            "/a2a/tasks/nonexistent",
+            "",
+            "{}",
+            &store,
+            &http,
+            None,
+        )
+        .await;
         assert_eq!(status, 404);
     }
 
@@ -964,7 +989,16 @@ mod tests {
         }
 
         let http = Client::new();
-        let (status, body) = route("DELETE", "/a2a/tasks/cancel-me", "", "{}", &store, &http, None).await;
+        let (status, body) = route(
+            "DELETE",
+            "/a2a/tasks/cancel-me",
+            "",
+            "{}",
+            &store,
+            &http,
+            None,
+        )
+        .await;
         assert_eq!(status, 200);
         assert!(body.contains("cancelled"));
 
