@@ -12,6 +12,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - **Balance command** (`can balance`) — Quick ALGO balance check without running full status
 - **History command** (`can history`) — View message history filtered by contact (alias for inbox with `--contact`)
+- **Fund command** (`can fund`) — Fund agent wallet from localnet faucet or testnet dispenser link
+- **Register command** (`can register`) — Register agent with Flock Directory for peer discovery
 - **MCP server mode** (`can mcp`) — Start as a JSON-RPC 2.0 MCP server for Claude Code, Cursor, and other MCP-compatible clients
   - Exposes 5 tools: `agent_info`, `list_contacts`, `get_inbox`, `check_balance`, `send_message`
   - Comprehensive MCP integration guide with Claude Code and Cursor setup instructions
@@ -35,7 +37,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
-- **14 CLI commands** — Added `balance`, `history`, `mcp`; removed `fund`, `register`
+- **16 CLI commands** — Added `balance`, `history`, `fund`, `register` (was 12 in v0.1.0)
 - **Wire type normalization** — Standardized plugin bridge JSON-RPC wire types
 - **spec-sync upgraded to v3.3.0** — Improved spec validation and sync tooling
 
