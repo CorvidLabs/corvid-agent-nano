@@ -154,9 +154,9 @@ fn validate_plugin_path(
     })?;
 
     // Canonicalize the requested path (resolves symlinks and `..` components)
-    let canonical_path = input_path.canonicalize().map_err(|e| {
-        format!("invalid path '{}': {e}", input_path.display())
-    })?;
+    let canonical_path = input_path
+        .canonicalize()
+        .map_err(|e| format!("invalid path '{}': {e}", input_path.display()))?;
 
     // Ensure the resolved path is inside the plugins directory
     if !canonical_path.starts_with(&canonical_plugins_dir) {
@@ -652,7 +652,10 @@ async fn main() -> Result<()> {
                     Ok(0) => break, // EOF
                     Ok(n) => {
                         if n > MAX_REQUEST_LINE_BYTES {
-                            tracing::warn!(bytes = n, "oversized JSON-RPC request; closing connection");
+                            tracing::warn!(
+                                bytes = n,
+                                "oversized JSON-RPC request; closing connection"
+                            );
                             break;
                         }
                         let req: JsonRpcRequest = match serde_json::from_str(&line) {

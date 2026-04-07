@@ -27,8 +27,7 @@ pub fn validate_url(url: &str, allowlist: &[String]) -> bool {
     // contains at least one dot (e.g. "example.com").  This prevents a bare
     // TLD entry such as "com" from accidentally matching every ".com" domain.
     allowlist.iter().any(|allowed| {
-        host == *allowed
-            || (allowed.contains('.') && host.ends_with(&format!(".{allowed}")))
+        host == *allowed || (allowed.contains('.') && host.ends_with(&format!(".{allowed}")))
     })
 }
 

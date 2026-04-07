@@ -414,10 +414,10 @@ describe("PluginBridge security", () => {
 
   test("buffer overflow closes socket", async () => {
     // Lower the limit to 1 KiB so the test is deterministic without sending MiBs.
-    // Cast through any because the property is private static readonly at TS level
+    // Cast through unknown because the property is private static readonly at TS level
     // but a regular JS property at runtime (not inlined).
-    const origLimit = (PluginBridge as { MAX_BUFFER_BYTES: number }).MAX_BUFFER_BYTES;
-    (PluginBridge as { MAX_BUFFER_BYTES: number }).MAX_BUFFER_BYTES = 1024;
+    const origLimit = (PluginBridge as unknown as { MAX_BUFFER_BYTES: number }).MAX_BUFFER_BYTES;
+    (PluginBridge as unknown as { MAX_BUFFER_BYTES: number }).MAX_BUFFER_BYTES = 1024;
 
     await bridge.connect(host.socketPath);
     expect(bridge.connected).toBe(true);
@@ -433,7 +433,7 @@ describe("PluginBridge security", () => {
       if (!bridge.connected) { disconnected = true; break; }
     }
 
-    (PluginBridge as { MAX_BUFFER_BYTES: number }).MAX_BUFFER_BYTES = origLimit;
+    (PluginBridge as unknown as { MAX_BUFFER_BYTES: number }).MAX_BUFFER_BYTES = origLimit;
     expect(disconnected).toBe(true);
   });
 
