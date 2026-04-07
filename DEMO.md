@@ -159,8 +159,8 @@ Now `can run` uses these settings automatically — no flags needed.
 can groups create --name scouting-team
 
 # Add members
-can groups add-member --group scouting-team --address <AGENT_1_ADDRESS> --label alpha
-can groups add-member --group scouting-team --address <AGENT_2_ADDRESS> --label beta
+can groups add-member --group scouting-team --address <AGENT_1_ADDRESS> --label "alpha"
+can groups add-member --group scouting-team --address <AGENT_2_ADDRESS> --label "beta"
 
 # View group details
 can groups show scouting-team
@@ -308,6 +308,8 @@ Now incoming messages are forwarded to the hub's AI for processing, and response
 ```bash
 # Run with health endpoint
 can run --health-port 9090 --log-format json
+# Note: --log-format is a global flag, so this also works:
+# can --log-format json run --health-port 9090
 
 # In another terminal, check health
 curl -s http://localhost:9090/health | jq
@@ -318,9 +320,11 @@ curl -s http://localhost:9090/health | jq
 {
   "status": "healthy",
   "network": "localnet",
+  "address": "XXXXX...",
   "uptime_secs": 42,
-  "contacts": 3,
-  "plugins_loaded": 1
+  "algod_url": "http://localhost:4001",
+  "indexer_url": "http://localhost:8980",
+  "hub_url": "http://localhost:3578"
 }
 ```
 

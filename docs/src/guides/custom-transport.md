@@ -59,7 +59,7 @@ pub struct SendResult {
 
 ## Example: WebSocket Transport
 
-Here's a complete example of a WebSocket-based transport:
+Here's a complete example of a WebSocket-based transport. This uses external crates (`tokio-tungstenite`, `futures-util`) that you'd add to your own `Cargo.toml`:
 
 ```rust
 use std::sync::Arc;
