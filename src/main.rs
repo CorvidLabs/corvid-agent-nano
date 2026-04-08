@@ -14,6 +14,7 @@ use zeroize::Zeroize;
 
 use algochat::{AlgoChat, AlgoChatConfig, AlgorandConfig};
 
+mod a2a;
 mod agent;
 mod algochat_transport;
 mod algorand;
@@ -232,6 +233,14 @@ enum Command {
         /// Use the new plugin runtime instead of the legacy message loop
         #[arg(long, default_value = "false")]
         runtime: bool,
+
+        /// Enable A2A HTTP server on this port (e.g. 9100)
+        #[arg(long, env = "CAN_A2A_PORT")]
+        a2a_port: Option<u16>,
+
+        /// Pre-shared key for A2A server authentication (optional)
+        #[arg(long, env = "CAN_A2A_PSK")]
+        a2a_psk: Option<String>,
     },
 
     /// Send an encrypted message to a contact, address, or group
@@ -536,6 +545,41 @@ enum Command {
         /// Maximum transactions to show (default: 50)
         #[arg(long, default_value = "50")]
         limit: u32,
+    },
+
+    /// Start a standalone A2A HTTP server (no message loop)
+    Serve {
+        /// Port to listen on
+        #[arg(long, default_value = "9100", env = "CAN_A2A_PORT")]
+        port: u16,
+
+        /// Agent name for the agent card
+        #[arg(long, default_value = "can")]
+        name: String,
+
+        /// Algorand network preset
+        #[arg(long, default_value = "localnet", env = "CAN_NETWORK")]
+        network: Network,
+
+        /// corvid-agent hub URL (omit for P2P mode)
+        #[arg(long)]
+        hub_url: Option<String>,
+
+        /// Pre-shared key for bearer token authentication
+        #[arg(long, env = "CAN_A2A_PSK")]
+        psk: Option<String>,
+
+        /// Agent seed (hex). If not provided, loads from keystore.
+        #[arg(long, env = "CAN_SEED")]
+        seed: Option<String>,
+
+        /// Agent Algorand address. Required if --seed is provided.
+        #[arg(long, env = "CAN_ADDRESS")]
+        address: Option<String>,
+
+        /// Keystore password (for loading from keystore)
+        #[arg(long, env = "CAN_PASSWORD")]
+        password: Option<String>,
     },
 }
 
@@ -862,6 +906,8 @@ async fn cmd_run(
     no_hub: bool,
     health_port: Option<u16>,
     use_runtime: bool,
+    a2a_port: Option<u16>,
+    a2a_psk: Option<String>,
     data_dir: &str,
 ) -> Result<()> {
     // First-run check: if no keystore and no seed flag, guide the user
@@ -1131,6 +1177,28 @@ async fn cmd_run(
         });
         info!(port = port, "health check endpoint listening on :{}", port);
         println!("  Health:   http://localhost:{}/health", port);
+    }
+
+    // ── A2A HTTP server ─────────────────────────────────────────────
+    if let Some(port) = a2a_port {
+        let a2a_config = a2a::A2aServerConfig {
+            port,
+            agent_name: name.clone(),
+            agent_address: agent_address.clone(),
+            hub_url: if no_hub { None } else { Some(hub_url.clone()) },
+            network: network.to_string(),
+            psk: a2a_psk,
+        };
+        tokio::spawn(async move {
+            if let Err(e) = a2a::serve_a2a(a2a_config).await {
+                warn!(error = %e, "A2A server error");
+            }
+        });
+        info!(port = port, "A2A server listening on :{}", port);
+        println!(
+            "  A2A:      http://localhost:{}/.well-known/agent.json",
+            port
+        );
     }
 
     if use_runtime {
@@ -2716,6 +2784,62 @@ async fn cmd_scan(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
+async fn cmd_serve(
+    port: u16,
+    name: String,
+    network: Network,
+    hub_url: Option<String>,
+    psk: Option<String>,
+    seed_hex: Option<String>,
+    address: Option<String>,
+    password: Option<String>,
+    data_dir: &str,
+) -> Result<()> {
+    // Load identity (needed for agent_address in the card)
+    let (_seed, agent_address) = load_identity(
+        seed_hex.as_deref(),
+        address.as_deref(),
+        password.as_deref(),
+        data_dir,
+    )?;
+
+    println!();
+    ui::header("Corvid Agent CAN — A2A Server");
+    ui::separator(50);
+    ui::field("Agent:", &name);
+    ui::field("Network:", &network.to_string());
+    ui::field("Address:", &agent_address);
+    ui::field("Port:", &port.to_string());
+    ui::field("Hub:", hub_url.as_deref().unwrap_or("disabled (P2P mode)"));
+    ui::field(
+        "Auth:",
+        if psk.is_some() {
+            "bearer token"
+        } else {
+            "none (open)"
+        },
+    );
+    ui::separator(50);
+    println!(
+        "  Agent card: http://localhost:{}/.well-known/agent.json",
+        port
+    );
+    println!("  Tasks:      http://localhost:{}/a2a/tasks", port);
+    println!();
+
+    let config = a2a::A2aServerConfig {
+        port,
+        agent_name: name,
+        agent_address,
+        hub_url,
+        network: network.to_string(),
+        psk,
+    };
+
+    a2a::serve_a2a(config).await
+}
+
 /// Apply config-file defaults to an Option — CLI/env takes priority, then config, then None.
 fn config_or<T: Clone>(cli_val: Option<T>, cfg_val: Option<&T>) -> Option<T> {
     cli_val.or_else(|| cfg_val.cloned())
@@ -2805,6 +2929,8 @@ async fn main() -> Result<()> {
             no_hub,
             health_port,
             runtime,
+            a2a_port,
+            a2a_psk,
         } => {
             cmd_run(
                 network,
@@ -2822,6 +2948,8 @@ async fn main() -> Result<()> {
                 no_hub || cfg.hub.disabled,
                 health_port.or(cfg.runtime.health_port),
                 runtime,
+                a2a_port,
+                a2a_psk,
                 data_dir,
             )
             .await
@@ -3024,6 +3152,22 @@ async fn main() -> Result<()> {
                 after_round,
                 limit,
                 contacts.as_ref(),
+            )
+            .await
+        }
+
+        Command::Serve {
+            port,
+            name,
+            network,
+            hub_url,
+            psk,
+            seed,
+            address,
+            password,
+        } => {
+            cmd_serve(
+                port, name, network, hub_url, psk, seed, address, password, data_dir,
             )
             .await
         }
