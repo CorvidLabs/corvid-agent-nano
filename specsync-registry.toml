@@ -2,6 +2,7 @@
 name = "corvid-agent-nano"
 
 [specs]
+a2a-server = "specs/binary/a2a-server.spec.md"
 contacts = "specs/binary/contacts.spec.md"
 core = "specs/core/core.spec.md"
 keystore = "specs/binary/keystore.spec.md"

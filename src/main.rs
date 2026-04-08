@@ -14,6 +14,7 @@ use zeroize::Zeroize;
 
 use algochat::{AlgoChat, AlgoChatConfig, AlgorandConfig};
 
+mod a2a;
 mod agent;
 mod algochat_transport;
 mod algorand;
@@ -228,6 +229,10 @@ enum Command {
         /// Enable health check HTTP endpoint on this port (e.g. 9090)
         #[arg(long, env = "CAN_HEALTH_PORT")]
         health_port: Option<u16>,
+
+        /// Enable A2A (Agent-to-Agent) HTTP server on this port (e.g. 9091)
+        #[arg(long, env = "CAN_A2A_PORT")]
+        a2a_port: Option<u16>,
 
         /// Use the new plugin runtime instead of the legacy message loop
         #[arg(long, default_value = "false")]
@@ -861,6 +866,7 @@ async fn cmd_run(
     no_plugins: bool,
     no_hub: bool,
     health_port: Option<u16>,
+    a2a_port: Option<u16>,
     use_runtime: bool,
     data_dir: &str,
 ) -> Result<()> {
@@ -1131,6 +1137,122 @@ async fn cmd_run(
         });
         info!(port = port, "health check endpoint listening on :{}", port);
         println!("  Health:   http://localhost:{}/health", port);
+    }
+
+    // ── A2A HTTP server ─────────────────────────────────────────────
+    if let Some(port) = a2a_port {
+        let a2a_store = a2a::TaskStore::new();
+        let (a2a_tx, mut a2a_rx) = tokio::sync::mpsc::channel::<a2a::InboundTask>(64);
+
+        let a2a_config = a2a::A2aServerConfig {
+            port,
+            agent_name: name.clone(),
+            agent_address: agent_address.clone(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
+        };
+
+        let server_store = a2a_store.clone();
+        tokio::spawn(async move {
+            if let Err(e) = a2a::serve(a2a_config, server_store, a2a_tx).await {
+                warn!(error = %e, "A2A server error");
+            }
+        });
+
+        // A2A task handler — forwards messages to the hub, same as AlgoChat flow
+        let handler_store = a2a_store.clone();
+        let handler_hub = if no_hub { None } else { Some(hub_url.clone()) };
+        tokio::spawn(async move {
+            let http = reqwest::Client::new();
+            while let Some(task) = a2a_rx.recv().await {
+                let store = handler_store.clone();
+                let hub = handler_hub.clone();
+                let http = http.clone();
+                tokio::spawn(async move {
+                    store.mark_working(&task.task_id).await;
+
+                    if let Some(hub_url) = hub {
+                        // Forward to hub and poll for response (reuses agent.rs pattern)
+                        let send_url = format!(
+                            "{}/a2a/tasks/send",
+                            hub_url.trim_end_matches('/')
+                        );
+                        let payload = serde_json::json!({
+                            "message": task.message,
+                            "timeoutMs": task.timeout.as_millis() as u64,
+                        });
+
+                        match http.post(&send_url).json(&payload).send().await {
+                            Ok(resp) if resp.status().is_success() => {
+                                #[derive(serde::Deserialize)]
+                                struct HubResp { id: String }
+                                if let Ok(hub_resp) = resp.json::<HubResp>().await {
+                                    // Poll hub for result
+                                    let poll_url = format!(
+                                        "{}/a2a/tasks/{}",
+                                        hub_url.trim_end_matches('/'),
+                                        hub_resp.id
+                                    );
+                                    let deadline = std::time::Instant::now() + task.timeout;
+                                    loop {
+                                        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                                        if std::time::Instant::now() > deadline {
+                                            store.fail(&task.task_id, "timeout waiting for hub response".to_string()).await;
+                                            break;
+                                        }
+                                        if let Ok(resp) = http.get(&poll_url).send().await {
+                                            if let Ok(status) = resp.json::<serde_json::Value>().await {
+                                                match status.get("state").and_then(|s| s.as_str()) {
+                                                    Some("completed") => {
+                                                        let text = status.get("response")
+                                                            .and_then(|r| r.as_str())
+                                                            .unwrap_or("")
+                                                            .to_string();
+                                                        store.complete(&task.task_id, text).await;
+                                                        break;
+                                                    }
+                                                    Some("failed") | Some("cancelled") => {
+                                                        store.fail(&task.task_id, "hub task failed".to_string()).await;
+                                                        break;
+                                                    }
+                                                    _ => {} // still running
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    store.fail(&task.task_id, "failed to parse hub response".to_string()).await;
+                                }
+                            }
+                            Ok(resp) => {
+                                store.fail(
+                                    &task.task_id,
+                                    format!("hub rejected: {}", resp.status()),
+                                ).await;
+                            }
+                            Err(e) => {
+                                store.fail(
+                                    &task.task_id,
+                                    format!("hub unreachable: {}", e),
+                                ).await;
+                            }
+                        }
+                    } else {
+                        // No hub — echo back (P2P mode placeholder)
+                        store.complete(
+                            &task.task_id,
+                            format!("[echo] {}", task.message),
+                        ).await;
+                    }
+                });
+            }
+        });
+
+        info!(port = port, "A2A server listening on :{}", port);
+        println!("  A2A:      http://localhost:{}/a2a/tasks/send", port);
+        println!(
+            "  Agent:    http://localhost:{}/.well-known/agent.json",
+            port
+        );
     }
 
     if use_runtime {
@@ -2804,6 +2926,7 @@ async fn main() -> Result<()> {
             no_plugins,
             no_hub,
             health_port,
+            a2a_port,
             runtime,
         } => {
             cmd_run(
@@ -2821,6 +2944,7 @@ async fn main() -> Result<()> {
                 no_plugins || cfg.runtime.no_plugins,
                 no_hub || cfg.hub.disabled,
                 health_port.or(cfg.runtime.health_port),
+                a2a_port,
                 runtime,
                 data_dir,
             )
