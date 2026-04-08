@@ -104,6 +104,10 @@ pub struct RuntimeConfig {
     /// Health check HTTP port (None = disabled).
     #[serde(default)]
     pub health_port: Option<u16>,
+
+    /// A2A (Agent-to-Agent) HTTP server port (None = disabled).
+    #[serde(default)]
+    pub a2a_port: Option<u16>,
 }
 
 impl Default for RuntimeConfig {
@@ -112,6 +116,7 @@ impl Default for RuntimeConfig {
             poll_interval: default_poll_interval(),
             no_plugins: false,
             health_port: None,
+            a2a_port: None,
         }
     }
 }

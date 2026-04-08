@@ -14,6 +14,7 @@ use zeroize::Zeroize;
 
 use algochat::{AlgoChat, AlgoChatConfig, AlgorandConfig};
 
+mod a2a;
 mod agent;
 mod algochat_transport;
 mod algorand;
@@ -228,6 +229,10 @@ enum Command {
         /// Enable health check HTTP endpoint on this port (e.g. 9090)
         #[arg(long, env = "CAN_HEALTH_PORT")]
         health_port: Option<u16>,
+
+        /// Enable A2A (Agent-to-Agent) HTTP server on this port (e.g. 3500)
+        #[arg(long, env = "CAN_A2A_PORT")]
+        a2a_port: Option<u16>,
 
         /// Use the new plugin runtime instead of the legacy message loop
         #[arg(long, default_value = "false")]
@@ -861,6 +866,7 @@ async fn cmd_run(
     no_plugins: bool,
     no_hub: bool,
     health_port: Option<u16>,
+    a2a_port: Option<u16>,
     use_runtime: bool,
     data_dir: &str,
 ) -> Result<()> {
@@ -1131,6 +1137,31 @@ async fn cmd_run(
         });
         info!(port = port, "health check endpoint listening on :{}", port);
         println!("  Health:   http://localhost:{}/health", port);
+    }
+
+    // ── A2A HTTP server ─────────────────────────────────────────────
+    if let Some(port) = a2a_port {
+        let a2a_config = a2a::A2aConfig {
+            port,
+            hub_url: if no_hub {
+                "http://localhost:3578".to_string()
+            } else {
+                hub_url.clone()
+            },
+            agent_name: name.clone(),
+            agent_address: agent_address.clone(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
+        };
+        tokio::spawn(async move {
+            if let Err(e) = a2a::serve_a2a(a2a_config).await {
+                warn!(error = %e, "A2A server error");
+            }
+        });
+        info!(port = port, "A2A server listening on :{}", port);
+        println!("  A2A:      http://localhost:{}/a2a/tasks/send", port);
+        if no_hub {
+            warn!("A2A server is running but hub is disabled — tasks will fail");
+        }
     }
 
     if use_runtime {
@@ -2804,6 +2835,7 @@ async fn main() -> Result<()> {
             no_plugins,
             no_hub,
             health_port,
+            a2a_port,
             runtime,
         } => {
             cmd_run(
@@ -2821,6 +2853,7 @@ async fn main() -> Result<()> {
                 no_plugins || cfg.runtime.no_plugins,
                 no_hub || cfg.hub.disabled,
                 health_port.or(cfg.runtime.health_port),
+                a2a_port.or(cfg.runtime.a2a_port),
                 runtime,
                 data_dir,
             )
