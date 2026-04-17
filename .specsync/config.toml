@@ -1,0 +1,17 @@
+# spec-sync v4 configuration
+# Docs: https://github.com/CorvidLabs/spec-sync
+
+specs_dir = "specs"
+source_dirs = [
+  "src",
+  "crates/corvid-plugin-cli/src",
+  "crates/corvid-plugin-host/src",
+  "crates/corvid-plugin-macros/src",
+  "crates/corvid-plugin-sdk/src",
+]
+exclude_dirs = ["target", "plugins"]
+exclude_patterns = ["**/*_test.rs", "**/tests/**"]
+required_sections = ["Purpose", "Public API", "Invariants", "Behavioral Examples", "Error Cases", "Dependencies", "Change Log"]
+
+[lifecycle]
+track_history = false

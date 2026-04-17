@@ -1,0 +1,28 @@
+{
+  "note": "Cross-project dependencies detected. Each referenced project should also be migrated to v4 for full compatibility. Run `specsync resolve --remote --verify` after all projects are migrated.",
+  "references": [
+    {
+      "local_module": "nano-cli",
+      "raw": "CorvidLabs/rs-algochat@algochat",
+      "remote_module": "algochat",
+      "remote_repo": "CorvidLabs/rs-algochat",
+      "spec_file": "specs/binary/nano-cli.spec.md"
+    },
+    {
+      "local_module": "transaction",
+      "raw": "CorvidLabs/rs-algochat@algochat",
+      "remote_module": "algochat",
+      "remote_repo": "CorvidLabs/rs-algochat",
+      "spec_file": "specs/binary/transaction.spec.md"
+    },
+    {
+      "local_module": "core",
+      "raw": "CorvidLabs/rs-algochat@algochat",
+      "remote_module": "algochat",
+      "remote_repo": "CorvidLabs/rs-algochat",
+      "spec_file": "specs/core/core.spec.md"
+    }
+  ],
+  "scanned_at": "2026-04-17T13:18:06Z",
+  "version": "4.0.0"
+}
