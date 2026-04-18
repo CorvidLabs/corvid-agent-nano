@@ -40,4 +40,16 @@ extern "C" {
     /// `req_ptr`/`req_len`: msgpack-encoded `LlmRequest` (messages + optional system prompt).
     /// Returns a pointer to a length-prefixed msgpack-encoded `LlmResponse`.
     pub fn host_llm_chat(req_ptr: i32, req_len: i32) -> i32;
+
+    /// TTS speak — synthesize text and play it on the host audio device.
+    ///
+    /// `req_ptr`/`req_len`: msgpack-encoded `TtsRequest` (text, voice, speed).
+    /// Returns a pointer to a length-prefixed msgpack-encoded `TtsResponse`.
+    /// Blocks until playback completes (or the backend queues it).
+    pub fn host_tts_speak(req_ptr: i32, req_len: i32) -> i32;
+
+    /// TTS list voices — enumerate available voice models on the host.
+    ///
+    /// Returns a pointer to a length-prefixed msgpack-encoded `Vec<String>`.
+    pub fn host_tts_list_voices() -> i32;
 }

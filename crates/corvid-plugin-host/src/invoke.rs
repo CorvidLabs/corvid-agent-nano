@@ -16,6 +16,7 @@ use crate::host_functions::fs::FsBackend;
 use crate::host_functions::llm::LlmBackend;
 use crate::host_functions::messaging::MessagingBackend;
 use crate::host_functions::storage::StorageBackend;
+use crate::host_functions::tts::TtsBackend;
 use crate::loader::PluginState;
 use crate::sandbox::{MemoryLimiter, SandboxLimits};
 
@@ -27,6 +28,7 @@ pub struct InvokeContext {
     pub db: Option<Arc<DbBackend>>,
     pub fs: Option<Arc<FsBackend>>,
     pub llm: Option<Arc<LlmBackend>>,
+    pub tts: Option<Arc<TtsBackend>>,
 }
 
 /// Create a WASM Store with all host functions linked for the given plugin.
@@ -66,6 +68,7 @@ fn create_execution_store(
         db: ctx.db.as_ref().map(Arc::clone),
         fs: ctx.fs.as_ref().map(Arc::clone),
         llm: ctx.llm.as_ref().map(Arc::clone),
+        tts: ctx.tts.as_ref().map(Arc::clone),
         message_target_filter,
     };
 
@@ -256,9 +259,11 @@ mod tests {
             db: None,
             fs: None,
             llm: None,
+            tts: None,
         };
         assert!(ctx.algo.is_none());
         assert!(ctx.messaging.is_none());
         assert!(ctx.llm.is_none());
+        assert!(ctx.tts.is_none());
     }
 }

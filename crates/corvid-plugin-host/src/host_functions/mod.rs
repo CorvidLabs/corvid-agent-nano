@@ -11,6 +11,7 @@ pub mod http;
 pub mod llm;
 pub mod messaging;
 pub mod storage;
+pub mod tts;
 
 use corvid_plugin_sdk::Capability;
 use wasmtime::Linker;
@@ -51,6 +52,9 @@ pub fn link_host_functions(
             }
             Capability::LlmChat => {
                 llm::link(linker)?;
+            }
+            Capability::AudioOutput => {
+                tts::link(linker)?;
             }
             _ => {
                 // Unknown/future capabilities — no host functions to link

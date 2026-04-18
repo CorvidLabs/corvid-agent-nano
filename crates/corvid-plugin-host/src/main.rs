@@ -17,6 +17,7 @@ use tokio::net::UnixListener;
 use corvid_plugin_host::engine::build_engine;
 use corvid_plugin_host::host_functions::llm::LlmBackend;
 use corvid_plugin_host::host_functions::storage::StorageBackend;
+use corvid_plugin_host::host_functions::tts::TtsBackend;
 use corvid_plugin_host::invoke::InvokeContext;
 use corvid_plugin_host::loader;
 use corvid_plugin_host::registry::PluginRegistry;
@@ -374,6 +375,7 @@ async fn handle_invoke(
     let invoke_ctx_db = state.invoke_ctx.db.as_ref().map(Arc::clone);
     let invoke_ctx_fs = state.invoke_ctx.fs.as_ref().map(Arc::clone);
     let invoke_ctx_llm = state.invoke_ctx.llm.as_ref().map(Arc::clone);
+    let invoke_ctx_tts = state.invoke_ctx.tts.as_ref().map(Arc::clone);
     let plugin_id_owned = plugin_id.to_string();
     let tool_owned = tool.to_string();
 
@@ -388,6 +390,7 @@ async fn handle_invoke(
             db: invoke_ctx_db,
             fs: invoke_ctx_fs,
             llm: invoke_ctx_llm,
+            tts: invoke_ctx_tts,
         };
 
         let handle = std::thread::spawn(move || {
@@ -478,6 +481,7 @@ async fn handle_event(
         let ctx_db = state.invoke_ctx.db.as_ref().map(Arc::clone);
         let ctx_fs = state.invoke_ctx.fs.as_ref().map(Arc::clone);
         let ctx_llm = state.invoke_ctx.llm.as_ref().map(Arc::clone);
+        let ctx_tts = state.invoke_ctx.tts.as_ref().map(Arc::clone);
         let event_clone = event.clone();
 
         let result = tokio::task::spawn_blocking(move || {
@@ -488,6 +492,7 @@ async fn handle_event(
                 db: ctx_db,
                 fs: ctx_fs,
                 llm: ctx_llm,
+                tts: ctx_tts,
             };
             corvid_plugin_host::invoke::dispatch_event_to_plugin(
                 &engine,
@@ -579,6 +584,12 @@ async fn main() -> Result<()> {
         tracing::info!("LLM backend configured (LlmChat capability available)");
     }
 
+    let tts_backend = Arc::new(TtsBackend::from_env());
+    tracing::info!(
+        "TTS backend configured: {:?} (AudioOutput capability available)",
+        tts_backend.kind
+    );
+
     let invoke_ctx = InvokeContext {
         storage: Arc::new(StorageBackend::new()),
         algo: None,      // Set to Some(...) when algod client is configured
@@ -586,6 +597,7 @@ async fn main() -> Result<()> {
         db: None,        // Set to Some(...) when database is configured
         fs: None,        // Set to Some(...) when project dir is configured
         llm: llm_backend,
+        tts: Some(tts_backend),
     };
 
     let state = Arc::new(ServerState {

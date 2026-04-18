@@ -61,3 +61,34 @@ pub struct LlmResponse {
 pub trait LlmService: Send + Sync {
     fn chat(&self, req: &LlmRequest) -> Result<LlmResponse, PluginError>;
 }
+
+/// Request sent to the host TTS service.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct TtsRequest {
+    /// Text to synthesize and speak aloud.
+    pub text: String,
+    /// Voice model name (e.g. "en_US-lessac-medium"). Empty = use default.
+    #[serde(default)]
+    pub voice: String,
+    /// Speech rate multiplier. 1.0 = normal, 0.5 = half speed, 2.0 = double.
+    #[serde(default = "default_speed")]
+    pub speed: f32,
+}
+
+fn default_speed() -> f32 {
+    1.0
+}
+
+/// Response from the host TTS service.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct TtsResponse {
+    pub ok: bool,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+/// Host-provided text-to-speech output service.
+pub trait TtsService: Send + Sync {
+    fn speak(&self, req: &TtsRequest) -> Result<TtsResponse, PluginError>;
+    fn list_voices(&self) -> Result<Vec<String>, PluginError>;
+}
