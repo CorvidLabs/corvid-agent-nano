@@ -260,6 +260,9 @@ mod tests {
         let raw = b"plain text body";
         // Should deserialize to Err and fall back
         let result = rmp_serde::from_slice::<HttpPostRequest>(raw);
-        assert!(result.is_err(), "raw bytes should fail msgpack deserialization");
+        assert!(
+            result.is_err(),
+            "raw bytes should fail msgpack deserialization"
+        );
     }
 }
