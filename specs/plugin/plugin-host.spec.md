@@ -1,6 +1,6 @@
 ---
 module: plugin-host
-version: 2
+version: 3
 status: stable
 files:
   - crates/corvid-plugin-host/src/main.rs
@@ -71,6 +71,7 @@ The Rust sidecar binary that hosts WASM plugins for corvid-agent. Runs as a sepa
 | `StorageBackend` | `host_functions/storage.rs` | Pluggable key-value storage backend |
 | `AlgoBackend` | `host_functions/algo.rs` | Pluggable Algorand state query backend |
 | `AlgoQuery` | `host_functions/algo.rs` | Algorand state query request |
+| `HttpPostRequest` | `host_functions/http.rs` | Msgpack-encoded HTTP POST request with optional headers and body; enables plugins to set custom headers (e.g. LLM auth) |
 | `MessageDispatch` | `host_functions/messaging.rs` | Message delivery tracker |
 | `MessagingBackend` | `host_functions/messaging.rs` | Pluggable agent message dispatch backend |
 | `DbBackend` | `host_functions/db.rs` | Pluggable read-only database query backend |
@@ -264,7 +265,7 @@ Host function linking is implemented — capabilities are gated at instantiation
 
 | File | Capability | Status | Description |
 |------|-----------|--------|-------------|
-| `http.rs` | `Network` | **Implemented** | Allowlisted outbound HTTP with SSRF mitigation via `ureq` |
+| `http.rs` | `Network` | **Implemented** | Allowlisted outbound HTTP with SSRF mitigation via `ureq`. `host_http_post` accepts either raw body bytes or a msgpack `HttpPostRequest { headers, body }` — the struct form allows plugins to supply custom headers (e.g. `x-api-key` for LLM providers) |
 | `storage.rs` | `Storage` | **Implemented** | Scoped key-value store per plugin namespace (in-memory) |
 | `algo.rs` | `AlgoRead` | **Implemented** | Read Algorand application state via pluggable `AlgoBackend` (trait-based for testability) |
 | `messaging.rs` | `AgentMessage` | **Implemented** | Send messages to agents via pluggable `MessagingBackend` with `target_filter` enforcement |
@@ -389,3 +390,4 @@ Host function linking is implemented — capabilities are gated at instantiation
 | 2026-04-06 | CorvidAgent | Updated to spec-sync v3.3.0 format — status: active → stable |
 | 2026-03-28 | CorvidAgent | Phase B data plane: `host_algo_state` with pluggable `AlgoBackend`, `host_send_message` with `MessagingBackend` + target_filter enforcement, `plugin.invoke` RPC via `__corvid_invoke` WASM export, `plugin.event` RPC via `__corvid_on_event`, `invoke.rs` execution module |
 | 2026-04-06 | CorvidAgent | v2: Implemented `host_db_query` (SELECT-only SQL with pluggable `DbBackend`), `host_fs_read` (sandboxed file read with `FsBackend` + path traversal protection), plugin dependency graph (topological sort, cycle detection, dependency checking at registration) |
+| 2026-04-18 | Jackdaw | v3 (spec-sync 4.x): Added `HttpPostRequest` struct — `host_http_post` now accepts msgpack `HttpPostRequest { headers, body }` to allow plugins to supply custom HTTP headers; falls back to treating body as raw bytes for backward compatibility |
