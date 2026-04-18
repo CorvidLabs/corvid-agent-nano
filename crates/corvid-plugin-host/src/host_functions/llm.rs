@@ -77,8 +77,7 @@ impl LlmBackend {
     /// Build from environment variables. Returns `None` if config is missing
     /// required values (e.g., no API key for Claude/OpenAI).
     pub fn from_env() -> Option<Self> {
-        let provider_str = std::env::var("CORVID_LLM_PROVIDER")
-            .unwrap_or_else(|_| "claude".into());
+        let provider_str = std::env::var("CORVID_LLM_PROVIDER").unwrap_or_else(|_| "claude".into());
         let api_key = std::env::var("CORVID_LLM_API_KEY").unwrap_or_default();
         let endpoint = std::env::var("CORVID_LLM_ENDPOINT").ok();
         let model = std::env::var("CORVID_LLM_MODEL").ok();
@@ -407,8 +406,7 @@ mod tests {
 
     #[test]
     fn backend_from_env_claude_with_key() {
-        let backend =
-            LlmBackend::from_config("claude", "test-key".into(), None, None).unwrap();
+        let backend = LlmBackend::from_config("claude", "test-key".into(), None, None).unwrap();
         assert_eq!(backend.provider, LlmProvider::Claude);
         assert_eq!(backend.api_key, "test-key");
         assert!(backend.endpoint.contains("anthropic.com"));
