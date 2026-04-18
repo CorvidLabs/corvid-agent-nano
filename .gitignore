@@ -5,3 +5,6 @@ Cargo.lock
 .env
 .DS_Store
 node_modules/
+
+# spec-sync hash cache (regenerated locally)
+.specsync/hashes.json
