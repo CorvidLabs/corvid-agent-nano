@@ -2,14 +2,25 @@
 //!
 //! Provides `#[corvid_plugin]` which generates WASM export boilerplate:
 //! - `__corvid_abi_version` — returns ABI version constant
-//! - `__corvid_manifest` — returns msgpack-serialized manifest
-//! - `__corvid_init` — deserializes InitContext, calls `init()`
-//! - `__corvid_tool_call` — routes tool invocations
-//! - `__corvid_handle_event` — deserializes event, calls `on_event()`
+//! - `__corvid_manifest` — returns ptr to length-prefixed msgpack manifest
+//! - `__corvid_invoke` — routes tool invocations (4-arg: tool + input ptr/len pairs)
+//! - `__corvid_on_event` — handles events (2-arg: event ptr/len)
 //! - `__corvid_shutdown` — calls `shutdown()`
 //! - `__corvid_alloc` / `__corvid_dealloc` — WASM memory management
 //!
 //! Also provides `#[corvid_tool]` for generating `PluginTool` impls.
+//!
+//! ## Host ABI contract
+//!
+//! The host calls `__corvid_invoke(tool_ptr, tool_len, input_ptr, input_len) -> i32`
+//! where the tool name is raw UTF-8 bytes at (tool_ptr, tool_len) and the input
+//! is msgpack-serialized JSON at (input_ptr, input_len). The return value is a
+//! pointer to `[4-byte LE len][msgpack data]` in WASM linear memory.
+//!
+//! `__corvid_manifest()` returns a pointer to the same length-prefixed format.
+//!
+//! Host functions (`host_kv_get`, `host_http_post`, etc.) also return pointers
+//! to length-prefixed buffers; 0 means not-found or error.
 
 use proc_macro::TokenStream;
 use quote::quote;
@@ -17,23 +28,25 @@ use syn::{parse_macro_input, ItemStruct};
 
 /// Generates WASM export glue for a struct implementing `CorvidPlugin`.
 ///
+/// The struct must also implement `Default` — the macro creates a fresh instance
+/// on every `__corvid_invoke` call because the WASM host creates a new Store per
+/// invocation. All persistent state must go through host KV functions.
+///
 /// # Usage
 /// ```ignore
 /// use corvid_plugin_sdk::prelude::*;
 /// use corvid_plugin_macros::corvid_plugin;
 ///
 /// #[corvid_plugin]
-/// struct MyPlugin { /* ... */ }
+/// #[derive(Default)]
+/// struct MyPlugin;
 ///
 /// impl CorvidPlugin for MyPlugin {
 ///     fn manifest() -> PluginManifest { /* ... */ }
 ///     fn tools(&self) -> &[Box<dyn PluginTool>] { /* ... */ }
-///     fn init(&mut self, ctx: InitContext) -> Result<(), PluginError> { /* ... */ }
+///     fn init(&mut self, _ctx: InitContext) -> Result<(), PluginError> { Ok(()) }
 /// }
 /// ```
-///
-/// This generates all necessary `extern "C"` functions for the WASM host
-/// to load and interact with the plugin, plus memory management helpers.
 #[proc_macro_attribute]
 pub fn corvid_plugin(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as ItemStruct);
@@ -47,168 +60,119 @@ pub fn corvid_plugin(_attr: TokenStream, item: TokenStream) -> TokenStream {
         #[cfg(target_arch = "wasm32")]
         mod __corvid_wasm_exports {
             use super::*;
-            use std::sync::Mutex;
-            use corvid_plugin_sdk::{CorvidPlugin, PluginManifest, ABI_VERSION};
+            use corvid_plugin_sdk::{CorvidPlugin, ABI_VERSION};
 
-            static INSTANCE: Mutex<Option<#struct_name>> = Mutex::new(None);
+            // ── Memory helpers ───────────────────────────────────────────
 
-            /// Helper: write bytes to WASM linear memory, return ptr|len packed as i64.
-            fn write_response(data: &[u8]) -> i64 {
-                let len = data.len() as i32;
-                let ptr = __corvid_alloc(len);
+            /// Allocate `total` bytes and write `[4-byte LE len][data]`.
+            /// Returns the ptr, or 0 on failure.
+            fn write_response(data: &[u8]) -> i32 {
+                let total_len = 4 + data.len();
+                let ptr = __corvid_alloc(total_len as i32);
+                if ptr == 0 {
+                    return 0;
+                }
                 unsafe {
                     let dest = ptr as *mut u8;
-                    std::ptr::copy_nonoverlapping(data.as_ptr(), dest, data.len());
+                    let len_bytes = (data.len() as u32).to_le_bytes();
+                    std::ptr::copy_nonoverlapping(len_bytes.as_ptr(), dest, 4);
+                    std::ptr::copy_nonoverlapping(data.as_ptr(), dest.add(4), data.len());
                 }
-                ((ptr as i64) << 32) | (len as i64 & 0xFFFF_FFFF)
+                ptr
             }
 
-            /// Helper: read bytes from WASM linear memory.
-            unsafe fn read_input(ptr: i32, len: i32) -> Vec<u8> {
-                let slice = std::slice::from_raw_parts(ptr as *const u8, len as usize);
-                slice.to_vec()
+            /// Read raw bytes from WASM linear memory at (ptr, len).
+            unsafe fn read_bytes(ptr: i32, len: i32) -> Vec<u8> {
+                std::slice::from_raw_parts(ptr as *const u8, len as usize).to_vec()
             }
+
+            // ── WASM exports ─────────────────────────────────────────────
 
             /// Returns the ABI version this plugin was compiled against.
             #[unsafe(no_mangle)]
-            pub extern "C" fn __corvid_abi_version() -> u32 {
-                ABI_VERSION
+            pub extern "C" fn __corvid_abi_version() -> i32 {
+                ABI_VERSION as i32
             }
 
-            /// Returns msgpack-serialized PluginManifest. Result is ptr|len packed as i64.
+            /// Returns ptr to `[4-byte LE len][msgpack PluginManifest]`.
             #[unsafe(no_mangle)]
-            pub extern "C" fn __corvid_manifest() -> i64 {
+            pub extern "C" fn __corvid_manifest() -> i32 {
                 let manifest = <#struct_name as CorvidPlugin>::manifest();
                 let data = rmp_serde::to_vec(&manifest).expect("manifest serialization failed");
                 write_response(&data)
             }
 
-            /// Instantiate the plugin and call init(). Input is msgpack InitContext stub.
-            /// Returns 0 on success, negative on error.
+            /// Invoke a tool. Called by the host with separate ptr/len for tool name
+            /// and input. Returns ptr to `[4-byte LE len][msgpack {"result":...}|{"error":...}]`.
+            ///
+            /// Creates a fresh plugin instance on every call — the WASM host creates
+            /// a new Store per invocation, so statics are reset. Use KV storage for
+            /// persistent state.
             #[unsafe(no_mangle)]
-            pub extern "C" fn __corvid_init(ptr: i32, len: i32) -> i64 {
-                let data = unsafe { read_input(ptr, len) };
-
-                // Deserialize the lightweight init payload (agent_id, host_version).
-                // Service handles are injected by the host via separate function calls.
-                #[derive(serde::Deserialize)]
-                struct InitPayload {
-                    agent_id: String,
-                    host_version: String,
-                }
-
-                let payload: InitPayload = match rmp_serde::from_slice(&data) {
-                    Ok(p) => p,
-                    Err(e) => {
-                        let msg = format!("init payload deserialize error: {e}");
-                        let data = rmp_serde::to_vec(&msg).unwrap_or_default();
-                        return -write_response(&data);
-                    }
-                };
-
-                let ctx = corvid_plugin_sdk::InitContext {
-                    agent_id: payload.agent_id,
-                    host_version: payload.host_version,
-                    storage: None,
-                    http: None,
-                    db: None,
-                    fs: None,
-                    algo: None,
-                    messaging: None,
-                };
-
-                let mut plugin = <#struct_name as Default>::default();
-                match plugin.init(ctx) {
-                    Ok(()) => {
-                        let mut lock = INSTANCE.lock().expect("plugin mutex poisoned");
-                        *lock = Some(plugin);
-                        0
-                    }
-                    Err(e) => {
-                        let msg = format!("{e}");
-                        let data = rmp_serde::to_vec(&msg).unwrap_or_default();
-                        -write_response(&data)
-                    }
-                }
-            }
-
-            /// Route a tool call. Input: msgpack `{ "tool": "name", "input": {...} }`.
-            /// Returns msgpack result string or error.
-            #[unsafe(no_mangle)]
-            pub extern "C" fn __corvid_tool_call(ptr: i32, len: i32) -> i64 {
-                let data = unsafe { read_input(ptr, len) };
-
-                #[derive(serde::Deserialize)]
-                struct ToolCallPayload {
-                    tool: String,
-                    input: serde_json::Value,
-                    session_id: String,
-                }
-
-                let payload: ToolCallPayload = match rmp_serde::from_slice(&data) {
-                    Ok(p) => p,
-                    Err(e) => {
-                        let msg = format!("tool call deserialize error: {e}");
-                        let resp = rmp_serde::to_vec(&Err::<String, String>(msg)).unwrap_or_default();
+            pub extern "C" fn __corvid_invoke(
+                tool_ptr: i32,
+                tool_len: i32,
+                input_ptr: i32,
+                input_len: i32,
+            ) -> i32 {
+                let tool_bytes = unsafe { read_bytes(tool_ptr, tool_len) };
+                let tool_name = match std::str::from_utf8(&tool_bytes) {
+                    Ok(s) => s.to_string(),
+                    Err(_) => {
+                        let resp = rmp_serde::to_vec(&serde_json::json!({"error": "invalid UTF-8 tool name"}))
+                            .unwrap_or_default();
                         return write_response(&resp);
                     }
                 };
 
-                let lock = INSTANCE.lock().expect("plugin mutex poisoned");
-                let plugin = match lock.as_ref() {
-                    Some(p) => p,
-                    None => {
-                        let resp = rmp_serde::to_vec(&Err::<String, String>(
-                            "plugin not initialized".into(),
-                        ))
-                        .unwrap_or_default();
+                let input_bytes = unsafe { read_bytes(input_ptr, input_len) };
+                let input: serde_json::Value = match rmp_serde::from_slice(&input_bytes) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        let resp = rmp_serde::to_vec(&serde_json::json!({"error": format!("bad input: {e}")}))
+                            .unwrap_or_default();
                         return write_response(&resp);
                     }
                 };
+
+                // Fresh instance each call — statics reset by the host's new Store.
+                let plugin = <#struct_name as Default>::default();
 
                 let manifest = <#struct_name as CorvidPlugin>::manifest();
                 let ctx = corvid_plugin_sdk::ToolContext {
                     agent_id: String::new(),
-                    session_id: payload.session_id,
+                    session_id: String::new(),
                     capabilities: manifest.capabilities.clone(),
                 };
 
                 let result = plugin
                     .tools()
                     .iter()
-                    .find(|t| t.name() == payload.tool)
-                    .map(|t| t.execute(payload.input, &ctx))
-                    .unwrap_or(Err(corvid_plugin_sdk::PluginError::BadInput(
-                        format!("unknown tool: {}", payload.tool),
-                    )));
+                    .find(|t| t.name() == tool_name.as_str())
+                    .map(|t| t.execute(input, &ctx))
+                    .unwrap_or_else(|| {
+                        Err(corvid_plugin_sdk::PluginError::BadInput(format!(
+                            "unknown tool: {tool_name}"
+                        )))
+                    });
 
                 let resp = match result {
-                    Ok(s) => rmp_serde::to_vec(&Ok::<String, String>(s)),
-                    Err(e) => rmp_serde::to_vec(&Err::<String, String>(format!("{e}"))),
+                    Ok(s) => rmp_serde::to_vec(&serde_json::json!({"result": s})),
+                    Err(e) => rmp_serde::to_vec(&serde_json::json!({"error": format!("{e}")})),
                 };
                 write_response(&resp.unwrap_or_default())
             }
 
-            /// Handle an event. Input: msgpack PluginEvent.
+            /// Handle an event. Returns 0 on success, -1 on error/skip.
             #[unsafe(no_mangle)]
-            pub extern "C" fn __corvid_handle_event(ptr: i32, len: i32) -> i64 {
-                let data = unsafe { read_input(ptr, len) };
-
+            pub extern "C" fn __corvid_on_event(event_ptr: i32, event_len: i32) -> i32 {
+                let data = unsafe { read_bytes(event_ptr, event_len) };
                 let event: corvid_plugin_sdk::PluginEvent = match rmp_serde::from_slice(&data) {
                     Ok(e) => e,
-                    Err(e) => {
-                        let msg = format!("event deserialize error: {e}");
-                        let resp = rmp_serde::to_vec(&msg).unwrap_or_default();
-                        return -write_response(&resp);
-                    }
+                    Err(_) => return -1,
                 };
 
-                let mut lock = INSTANCE.lock().expect("plugin mutex poisoned");
-                let plugin = match lock.as_mut() {
-                    Some(p) => p,
-                    None => return -1,
-                };
-
+                let mut plugin = <#struct_name as Default>::default();
                 let manifest = <#struct_name as CorvidPlugin>::manifest();
                 let ctx = corvid_plugin_sdk::ToolContext {
                     agent_id: String::new(),
@@ -218,37 +182,27 @@ pub fn corvid_plugin(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
                 match plugin.on_event(event, &ctx) {
                     Ok(()) => 0,
-                    Err(e) => {
-                        let msg = format!("{e}");
-                        let resp = rmp_serde::to_vec(&msg).unwrap_or_default();
-                        -write_response(&resp)
-                    }
+                    Err(_) => -1,
                 }
             }
 
-            /// Clean shutdown.
+            /// Shutdown hook — called before the WASM module is torn down.
             #[unsafe(no_mangle)]
-            pub extern "C" fn __corvid_shutdown() {
-                let mut lock = INSTANCE.lock().expect("plugin mutex poisoned");
-                if let Some(plugin) = lock.as_mut() {
-                    plugin.shutdown();
-                }
-                *lock = None;
-            }
+            pub extern "C" fn __corvid_shutdown() {}
 
             /// WASM memory allocator — host calls this to reserve space for inputs.
             #[unsafe(no_mangle)]
             pub extern "C" fn __corvid_alloc(size: i32) -> i32 {
-                let layout = std::alloc::Layout::from_size_align(size as usize, 1)
-                    .expect("invalid alloc layout");
+                let layout =
+                    std::alloc::Layout::from_size_align(size as usize, 1).expect("invalid alloc layout");
                 unsafe { std::alloc::alloc(layout) as i32 }
             }
 
-            /// WASM memory deallocator — host calls this to free response buffers.
+            /// WASM memory deallocator.
             #[unsafe(no_mangle)]
             pub extern "C" fn __corvid_dealloc(ptr: i32, size: i32) {
-                let layout = std::alloc::Layout::from_size_align(size as usize, 1)
-                    .expect("invalid dealloc layout");
+                let layout =
+                    std::alloc::Layout::from_size_align(size as usize, 1).expect("invalid dealloc layout");
                 unsafe { std::alloc::dealloc(ptr as *mut u8, layout) }
             }
         }
