@@ -23,6 +23,13 @@ pub enum Capability {
 
     /// Send messages to matching agents.
     AgentMessage { target_filter: String },
+
+    /// Access the host-managed LLM service (Claude, OpenAI, Ollama).
+    ///
+    /// The host configures the provider, model, and API key via env vars.
+    /// Plugins call `host_llm_chat` with a list of messages and receive
+    /// a text response. This keeps API keys out of WASM memory.
+    LlmChat,
 }
 
 impl fmt::Display for Capability {
@@ -36,6 +43,7 @@ impl fmt::Display for Capability {
             Self::AgentMessage { target_filter } => {
                 write!(f, "AgentMessage({target_filter})")
             }
+            Self::LlmChat => write!(f, "LlmChat"),
         }
     }
 }

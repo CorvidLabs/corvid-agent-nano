@@ -18,7 +18,8 @@ pub use context::{InitContext, ToolContext};
 pub use error::{EventKind, PluginError, PluginEvent};
 pub use manifest::{PluginManifest, ToolInfo, TrustTier};
 pub use service::{
-    AlgoReadService, DbReadService, FsReadService, HttpService, MessagingService, StorageService,
+    AlgoReadService, DbReadService, FsReadService, HttpService, LlmMessage, LlmRequest,
+    LlmResponse, LlmService, MessagingService, StorageService,
 };
 pub use tool::PluginTool;
 

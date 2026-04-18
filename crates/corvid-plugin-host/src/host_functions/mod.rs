@@ -8,6 +8,7 @@ pub mod algo;
 pub mod db;
 pub mod fs;
 pub mod http;
+pub mod llm;
 pub mod messaging;
 pub mod storage;
 
@@ -47,6 +48,9 @@ pub fn link_host_functions(
             }
             Capability::FsProjectDir => {
                 fs::link(linker)?;
+            }
+            Capability::LlmChat => {
+                llm::link(linker)?;
             }
             _ => {
                 // Unknown/future capabilities — no host functions to link
