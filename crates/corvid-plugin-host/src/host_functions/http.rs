@@ -1,4 +1,8 @@
 //! Host function: allowlisted outbound HTTP with SSRF mitigation.
+//!
+//! `host_http_post` accepts a msgpack-serialized `HttpPostRequest` as its body,
+//! which lets plugins supply custom headers (required for LLM API auth). If
+//! deserialization fails the raw bytes are sent as-is (backward compat).
 
 use wasmtime::Linker;
 
@@ -6,26 +10,26 @@ use crate::loader::PluginState;
 use crate::sandbox::is_ssrf_blocked;
 use crate::wasm_mem;
 
-/// Validates a URL against an allowlist and SSRF rules.
+/// Structured POST request body plugin can pass to `host_http_post`.
 ///
-/// Returns true if the request should be allowed.
+/// Plugins serialize this as msgpack and pass the bytes as the body parameter.
+/// Headers are `(name, value)` pairs; Content-Type defaults to
+/// `application/octet-stream` if not provided.
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct HttpPostRequest {
+    pub headers: Vec<(String, String)>,
+    pub body: Vec<u8>,
+}
+
+/// Validates a URL against an allowlist and SSRF rules.
 pub fn validate_url(url: &str, allowlist: &[String]) -> bool {
-    // SSRF check first
     if is_ssrf_blocked(url) {
         return false;
     }
-
-    // Extract host from URL for allowlist check
     let host = match extract_host_from_url(url) {
         Some(h) => h,
         None => return false,
     };
-
-    // Check against allowlist.
-    //
-    // Subdomain matching is only applied when the allowlist entry itself
-    // contains at least one dot (e.g. "example.com").  This prevents a bare
-    // TLD entry such as "com" from accidentally matching every ".com" domain.
     allowlist.iter().any(|allowed| {
         host == *allowed || (allowed.contains('.') && host.ends_with(&format!(".{allowed}")))
     })
@@ -36,25 +40,23 @@ fn extract_host_from_url(url: &str) -> Option<String> {
         .strip_prefix("http://")
         .or_else(|| url.strip_prefix("https://"))?;
     let host_port = after_scheme.split('/').next()?;
-    // Strip port
     Some(host_port.split(':').next().unwrap_or(host_port).to_string())
 }
 
-/// MessagePack-serialized HTTP response written back to WASM memory.
+/// Msgpack-serialized HTTP response written back to WASM memory.
 #[derive(serde::Serialize)]
 struct HttpResponse {
     status: u16,
     body: Vec<u8>,
 }
 
-/// MessagePack-serialized HTTP error written back to WASM memory.
+/// Msgpack-serialized HTTP error written back to WASM memory.
 #[derive(serde::Serialize)]
 struct HttpError {
     status: u16,
     error: String,
 }
 
-/// Execute an HTTP GET request, returning msgpack-serialized response.
 fn do_http_get(url: &str) -> Vec<u8> {
     match ureq::get(url).call() {
         Ok(response) => {
@@ -70,12 +72,30 @@ fn do_http_get(url: &str) -> Vec<u8> {
     }
 }
 
-/// Execute an HTTP POST request, returning msgpack-serialized response.
-fn do_http_post(url: &str, request_body: &[u8]) -> Vec<u8> {
-    match ureq::post(url)
-        .header("Content-Type", "application/octet-stream")
-        .send(request_body)
-    {
+/// Execute an HTTP POST. Body bytes are tried as msgpack `HttpPostRequest` first;
+/// if that fails they are sent raw as `application/octet-stream`.
+fn do_http_post(url: &str, body_bytes: &[u8]) -> Vec<u8> {
+    let (headers, raw_body): (Vec<(String, String)>, Vec<u8>) =
+        if let Ok(req) = rmp_serde::from_slice::<HttpPostRequest>(body_bytes) {
+            (req.headers, req.body)
+        } else {
+            (vec![], body_bytes.to_vec())
+        };
+
+    let mut builder = ureq::post(url);
+
+    let mut has_content_type = false;
+    for (name, value) in &headers {
+        if name.to_lowercase() == "content-type" {
+            has_content_type = true;
+        }
+        builder = builder.header(name.as_str(), value.as_str());
+    }
+    if !has_content_type {
+        builder = builder.header("Content-Type", "application/octet-stream");
+    }
+
+    match builder.send(&raw_body[..]) {
         Ok(response) => {
             let status: u16 = response.status().into();
             let body = response.into_body().read_to_vec().unwrap_or_default();
@@ -121,6 +141,9 @@ pub fn link(linker: &mut Linker<PluginState>) -> anyhow::Result<()> {
     )?;
 
     // host_http_post(url_ptr, url_len, body_ptr, body_len) -> ptr
+    //
+    // Body bytes: try msgpack HttpPostRequest { headers, body } first.
+    // Falls back to raw bytes + application/octet-stream if deserialization fails.
     linker.func_wrap(
         "env",
         "host_http_post",
@@ -138,7 +161,7 @@ pub fn link(linker: &mut Linker<PluginState>) -> anyhow::Result<()> {
                 }
             };
 
-            let request_body = match wasm_mem::read_bytes(&mut caller, body_ptr, body_len) {
+            let body_bytes = match wasm_mem::read_bytes(&mut caller, body_ptr, body_len) {
                 Some(b) => b,
                 None => {
                     tracing::warn!("host_http_post: failed to read body from WASM memory");
@@ -157,7 +180,7 @@ pub fn link(linker: &mut Linker<PluginState>) -> anyhow::Result<()> {
                 return wasm_mem::write_response(&mut caller, &err);
             }
 
-            let response = do_http_post(&url, &request_body);
+            let response = do_http_post(&url, &body_bytes);
             wasm_mem::write_response(&mut caller, &response)
         },
     )?;
@@ -186,7 +209,6 @@ mod tests {
 
     #[test]
     fn ssrf_blocked_even_if_allowlisted() {
-        // Even if somehow allowlisted, SSRF targets are blocked
         let list = vec!["127.0.0.1".into()];
         assert!(!validate_url("http://127.0.0.1/admin", &list));
     }
@@ -204,8 +226,6 @@ mod tests {
 
     #[test]
     fn bare_tld_in_allowlist_does_not_match_all_subdomains() {
-        // A single-label entry like "com" must NOT act as a wildcard for all
-        // .com domains — it should only match the exact hostname "com".
         let list = vec!["com".into()];
         assert!(!validate_url("https://evil.com/steal", &list));
         assert!(!validate_url("https://attacker.com/", &list));
@@ -213,10 +233,36 @@ mod tests {
 
     #[test]
     fn allowlist_requires_dot_for_subdomain_match() {
-        // Confirm that a proper multi-label entry still allows subdomains
         let list = vec!["example.com".into()];
         assert!(validate_url("https://api.example.com/v1", &list));
-        // but a non-matching domain is still blocked
         assert!(!validate_url("https://notexample.com/", &list));
+    }
+
+    #[test]
+    fn http_post_request_msgpack_roundtrip() {
+        let req = HttpPostRequest {
+            headers: vec![
+                ("Content-Type".into(), "application/json".into()),
+                ("x-api-key".into(), "sk-test-123".into()),
+            ],
+            body: b"{\"hello\": \"world\"}".to_vec(),
+        };
+        let packed = rmp_serde::to_vec(&req).unwrap();
+        let unpacked: HttpPostRequest = rmp_serde::from_slice(&packed).unwrap();
+        assert_eq!(unpacked.headers.len(), 2);
+        assert_eq!(unpacked.headers[0].0, "Content-Type");
+        assert_eq!(unpacked.body, b"{\"hello\": \"world\"}");
+    }
+
+    #[test]
+    fn http_post_request_fallback_on_raw_bytes() {
+        // Raw bytes that are not valid msgpack HttpPostRequest
+        let raw = b"plain text body";
+        // Should deserialize to Err and fall back
+        let result = rmp_serde::from_slice::<HttpPostRequest>(raw);
+        assert!(
+            result.is_err(),
+            "raw bytes should fail msgpack deserialization"
+        );
     }
 }
