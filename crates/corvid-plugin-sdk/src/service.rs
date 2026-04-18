@@ -31,3 +31,33 @@ pub trait AlgoReadService: Send + Sync {
 pub trait MessagingService: Send + Sync {
     fn send(&self, target: &str, message: &str) -> Result<(), PluginError>;
 }
+
+/// A single message in an LLM conversation.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct LlmMessage {
+    pub role: String,
+    pub content: String,
+}
+
+/// Request sent to the host LLM service.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct LlmRequest {
+    /// Conversation messages (user/assistant turns).
+    pub messages: Vec<LlmMessage>,
+    /// Optional system prompt override. If empty, the host uses its default.
+    #[serde(default)]
+    pub system: String,
+}
+
+/// Response from the host LLM service.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct LlmResponse {
+    pub content: String,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+/// Host-provided LLM chat service. Provider and API key are managed by the host.
+pub trait LlmService: Send + Sync {
+    fn chat(&self, req: &LlmRequest) -> Result<LlmResponse, PluginError>;
+}

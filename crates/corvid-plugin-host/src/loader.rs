@@ -11,6 +11,7 @@ use wasmtime::{Engine, Instance, Linker, Module, Store};
 use crate::host_functions::algo::AlgoBackend;
 use crate::host_functions::db::DbBackend;
 use crate::host_functions::fs::FsBackend;
+use crate::host_functions::llm::LlmBackend;
 use crate::host_functions::messaging::MessagingBackend;
 use crate::host_functions::storage::StorageBackend;
 use crate::sandbox::{MemoryLimiter, SandboxLimits};
@@ -56,6 +57,7 @@ pub struct PluginState {
     pub messaging: Option<Arc<MessagingBackend>>,
     pub db: Option<Arc<DbBackend>>,
     pub fs: Option<Arc<FsBackend>>,
+    pub llm: Option<Arc<LlmBackend>>,
     /// Target filter pattern from the AgentMessage capability (glob-style).
     pub message_target_filter: Option<String>,
 }
@@ -348,6 +350,7 @@ pub fn load_plugin(
             messaging: None,
             db: None,
             fs: None,
+            llm: None,
             message_target_filter: None,
         },
     );

@@ -34,4 +34,10 @@ extern "C" {
 
     /// Agent message send.
     pub fn host_send_message(target_ptr: i32, target_len: i32, msg_ptr: i32, msg_len: i32) -> i32;
+
+    /// LLM chat — send messages to the host-managed LLM and receive a response.
+    ///
+    /// `req_ptr`/`req_len`: msgpack-encoded `LlmRequest` (messages + optional system prompt).
+    /// Returns a pointer to a length-prefixed msgpack-encoded `LlmResponse`.
+    pub fn host_llm_chat(req_ptr: i32, req_len: i32) -> i32;
 }

@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use crate::capability::Capability;
 use crate::service::{
-    AlgoReadService, DbReadService, FsReadService, HttpService, MessagingService, StorageService,
+    AlgoReadService, DbReadService, FsReadService, HttpService, LlmService, MessagingService,
+    StorageService,
 };
 
 /// Context passed to [`CorvidPlugin::init()`].
@@ -32,6 +33,9 @@ pub struct InitContext {
 
     /// Agent message bus. Present only when `AgentMessage` capability granted.
     pub messaging: Option<Arc<dyn MessagingService>>,
+
+    /// LLM chat service. Present only when `LlmChat` capability granted.
+    pub llm: Option<Arc<dyn LlmService>>,
 }
 
 /// Context passed to tool execution and event handling.

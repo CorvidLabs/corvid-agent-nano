@@ -21,6 +21,8 @@ pub struct SandboxLimits {
     pub messaging_allowed: bool,
     /// Whether Algorand state reads are allowed.
     pub algo_read_allowed: bool,
+    /// Whether the host LLM service is accessible.
+    pub llm_allowed: bool,
 }
 
 impl SandboxLimits {
@@ -35,6 +37,7 @@ impl SandboxLimits {
                 db_read_allowed: true,
                 messaging_allowed: true,
                 algo_read_allowed: true,
+                llm_allowed: true,
             },
             TrustTier::Verified => Self {
                 memory_bytes: 32 * 1024 * 1024, // 32 MB
@@ -44,6 +47,7 @@ impl SandboxLimits {
                 db_read_allowed: true,
                 messaging_allowed: false,
                 algo_read_allowed: true,
+                llm_allowed: true,
             },
             TrustTier::Untrusted => Self {
                 memory_bytes: 4 * 1024 * 1024, // 4 MB
@@ -53,6 +57,7 @@ impl SandboxLimits {
                 db_read_allowed: false,
                 messaging_allowed: false,
                 algo_read_allowed: false,
+                llm_allowed: false,
             },
         }
     }

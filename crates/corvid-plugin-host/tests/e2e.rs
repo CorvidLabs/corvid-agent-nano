@@ -71,6 +71,7 @@ fn test_invoke_ctx() -> InvokeContext {
         messaging: None,
         db: None,
         fs: None,
+        llm: None,
     }
 }
 
