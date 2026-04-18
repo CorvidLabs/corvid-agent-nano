@@ -35,36 +35,32 @@ pub struct LlmBackend {
 }
 
 impl LlmBackend {
-    /// Build from environment variables. Returns `None` if config is missing
+    /// Build from explicit config values. Returns `None` if config is missing
     /// required values (e.g., no API key for Claude/OpenAI).
-    pub fn from_env() -> Option<Self> {
-        let provider_str = std::env::var("CORVID_LLM_PROVIDER")
-            .unwrap_or_else(|_| "claude".into())
-            .to_lowercase();
-
-        let provider = match provider_str.as_str() {
+    pub fn from_config(
+        provider_str: &str,
+        api_key: String,
+        endpoint_override: Option<String>,
+        model_override: Option<String>,
+    ) -> Option<Self> {
+        let provider = match provider_str.to_lowercase().as_str() {
             "openai" => LlmProvider::OpenAi,
             "ollama" => LlmProvider::Ollama,
             _ => LlmProvider::Claude,
         };
 
-        let api_key = std::env::var("CORVID_LLM_API_KEY").unwrap_or_default();
-
-        // Claude and OpenAI require an API key
         if api_key.is_empty() && provider != LlmProvider::Ollama {
-            tracing::warn!(
-                "CORVID_LLM_API_KEY not set — LlmChat capability will be unavailable"
-            );
+            tracing::warn!("LlmChat: no API key provided — capability will be unavailable");
             return None;
         }
 
-        let endpoint = std::env::var("CORVID_LLM_ENDPOINT").unwrap_or_else(|_| match provider {
+        let endpoint = endpoint_override.unwrap_or_else(|| match provider {
             LlmProvider::Claude => "https://api.anthropic.com/v1/messages".into(),
             LlmProvider::OpenAi => "https://api.openai.com/v1/chat/completions".into(),
             LlmProvider::Ollama => "http://localhost:11434/api/chat".into(),
         });
 
-        let model = std::env::var("CORVID_LLM_MODEL").unwrap_or_else(|_| match provider {
+        let model = model_override.unwrap_or_else(|| match provider {
             LlmProvider::Claude => "claude-haiku-4-5-20251001".into(),
             LlmProvider::OpenAi => "gpt-4o-mini".into(),
             LlmProvider::Ollama => "llama3".into(),
@@ -76,6 +72,17 @@ impl LlmBackend {
             api_key,
             model,
         })
+    }
+
+    /// Build from environment variables. Returns `None` if config is missing
+    /// required values (e.g., no API key for Claude/OpenAI).
+    pub fn from_env() -> Option<Self> {
+        let provider_str = std::env::var("CORVID_LLM_PROVIDER")
+            .unwrap_or_else(|_| "claude".into());
+        let api_key = std::env::var("CORVID_LLM_API_KEY").unwrap_or_default();
+        let endpoint = std::env::var("CORVID_LLM_ENDPOINT").ok();
+        let model = std::env::var("CORVID_LLM_MODEL").ok();
+        Self::from_config(&provider_str, api_key, endpoint, model)
     }
 
     /// Call the LLM and return the response text.
@@ -385,47 +392,38 @@ mod tests {
 
     #[test]
     fn backend_from_env_no_key() {
-        // Without CORVID_LLM_API_KEY set (and not Ollama), should return None
-        std::env::remove_var("CORVID_LLM_API_KEY");
-        std::env::remove_var("CORVID_LLM_PROVIDER");
-        let backend = LlmBackend::from_env();
+        let backend = LlmBackend::from_config("claude", String::new(), None, None);
         assert!(backend.is_none(), "should return None without API key");
     }
 
     #[test]
     fn backend_from_env_ollama_no_key_needed() {
-        std::env::set_var("CORVID_LLM_PROVIDER", "ollama");
-        std::env::remove_var("CORVID_LLM_API_KEY");
-        let backend = LlmBackend::from_env();
+        let backend = LlmBackend::from_config("ollama", String::new(), None, None);
         assert!(backend.is_some(), "Ollama does not require an API key");
         let b = backend.unwrap();
         assert_eq!(b.provider, LlmProvider::Ollama);
         assert!(b.endpoint.contains("11434"));
-        std::env::remove_var("CORVID_LLM_PROVIDER");
     }
 
     #[test]
     fn backend_from_env_claude_with_key() {
-        std::env::set_var("CORVID_LLM_PROVIDER", "claude");
-        std::env::set_var("CORVID_LLM_API_KEY", "test-key");
-        let backend = LlmBackend::from_env().unwrap();
+        let backend =
+            LlmBackend::from_config("claude", "test-key".into(), None, None).unwrap();
         assert_eq!(backend.provider, LlmProvider::Claude);
         assert_eq!(backend.api_key, "test-key");
         assert!(backend.endpoint.contains("anthropic.com"));
-        std::env::remove_var("CORVID_LLM_PROVIDER");
-        std::env::remove_var("CORVID_LLM_API_KEY");
     }
 
     #[test]
     fn backend_from_env_custom_endpoint() {
-        std::env::set_var("CORVID_LLM_PROVIDER", "openai");
-        std::env::set_var("CORVID_LLM_API_KEY", "test-key");
-        std::env::set_var("CORVID_LLM_ENDPOINT", "https://my-proxy.example.com/v1/chat");
-        let backend = LlmBackend::from_env().unwrap();
+        let backend = LlmBackend::from_config(
+            "openai",
+            "test-key".into(),
+            Some("https://my-proxy.example.com/v1/chat".into()),
+            None,
+        )
+        .unwrap();
         assert_eq!(backend.endpoint, "https://my-proxy.example.com/v1/chat");
-        std::env::remove_var("CORVID_LLM_PROVIDER");
-        std::env::remove_var("CORVID_LLM_API_KEY");
-        std::env::remove_var("CORVID_LLM_ENDPOINT");
     }
 
     #[test]

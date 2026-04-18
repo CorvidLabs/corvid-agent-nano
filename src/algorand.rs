@@ -511,7 +511,7 @@ impl HttpIndexerClient {
         }
 
         let mut result: Vec<DiscoveredAgent> = agents.into_values().collect();
-        result.sort_by(|a, b| b.last_seen_round.cmp(&a.last_seen_round));
+        result.sort_by_key(|a| std::cmp::Reverse(a.last_seen_round));
         Ok(result)
     }
 }
