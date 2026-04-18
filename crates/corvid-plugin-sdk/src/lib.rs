@@ -19,7 +19,7 @@ pub use error::{EventKind, PluginError, PluginEvent};
 pub use manifest::{PluginManifest, ToolInfo, TrustTier};
 pub use service::{
     AlgoReadService, DbReadService, FsReadService, HttpService, LlmMessage, LlmRequest,
-    LlmResponse, LlmService, MessagingService, StorageService,
+    LlmResponse, LlmService, MessagingService, StorageService, TtsRequest, TtsResponse, TtsService,
 };
 pub use tool::PluginTool;
 
@@ -77,6 +77,7 @@ mod tests {
         assert_eq!(Capability::AlgoRead.to_string(), "AlgoRead");
         assert_eq!(Capability::DbRead.to_string(), "DbRead");
         assert_eq!(Capability::FsProjectDir.to_string(), "FsProjectDir");
+        assert_eq!(Capability::AudioOutput.to_string(), "AudioOutput");
     }
 
     #[test]

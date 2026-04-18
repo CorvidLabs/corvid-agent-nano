@@ -30,6 +30,13 @@ pub enum Capability {
     /// Plugins call `host_llm_chat` with a list of messages and receive
     /// a text response. This keeps API keys out of WASM memory.
     LlmChat,
+
+    /// Text-to-speech audio output via the host-managed TTS engine.
+    ///
+    /// The host configures the TTS backend (Piper by default) via env vars.
+    /// Plugins call `host_tts_speak` with text and optional voice/speed params.
+    /// Audio plays on the host system — WASM cannot access audio devices directly.
+    AudioOutput,
 }
 
 impl fmt::Display for Capability {
@@ -44,6 +51,7 @@ impl fmt::Display for Capability {
                 write!(f, "AgentMessage({target_filter})")
             }
             Self::LlmChat => write!(f, "LlmChat"),
+            Self::AudioOutput => write!(f, "AudioOutput"),
         }
     }
 }

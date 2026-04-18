@@ -72,6 +72,7 @@ fn test_invoke_ctx() -> InvokeContext {
         db: None,
         fs: None,
         llm: None,
+        tts: None,
     }
 }
 
