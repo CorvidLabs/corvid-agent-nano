@@ -5,6 +5,10 @@ on:
     branches: [main]
     paths:
       - 'docs/**'
+      - 'src/**'          # atlas spec-coverage badge tracks the source
+      - 'crates/**'       # and the runtime crates
+      - 'specs/**'        # and the specs that govern them
+      - '.atlasignore'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 
@@ -17,11 +21,18 @@ concurrency:
   group: pages
   cancel-in-progress: false
 
+# Run the bundled Node-20 JavaScript actions on Node 24 to silence GitHub's
+# Node-20 end-of-life deprecation warnings.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0   # atlas reads git history for activity
 
       - name: Install mdBook
         run: |
@@ -31,6 +42,30 @@ jobs:
 
       - name: Build docs
         run: mdbook build docs
+
+      # Render corvid-agent-nano's spec-coverage badge + SVG cards from the atlas
+      # into the built mdBook site, so they ship to Pages alongside the docs
+      # (served at corvidlabs.github.io/corvid-agent-nano/badges/). Cached by the
+      # pinned v1 commit so the step is a fast no-op on a cache hit.
+      - name: Resolve pinned atlas commit (cache key)
+        id: atlasref
+        run: echo "sha=$(git ls-remote https://github.com/CorvidLabs/fledge-plugin-atlas v1 | cut -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the fledge-atlas CLI
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/fledge-atlas
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
+          key: fledge-atlas-${{ runner.os }}-${{ steps.atlasref.outputs.sha }}
+
+      - name: Render atlas coverage badges
+        uses: CorvidLabs/fledge-plugin-atlas@v1
+        with:
+          path: .
+          output-dir: docs/book/badges
+          components: "coverage langmix treemap sunburst"
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

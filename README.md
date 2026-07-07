@@ -5,6 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/Rust-1.75%2B-orange.svg?logo=rust)](https://www.rust-lang.org/)
 [![Algorand](https://img.shields.io/badge/Algorand-AlgoChat-black.svg?logo=algorand)](https://algorand.co)
+![spec coverage](https://img.shields.io/endpoint?url=https://corvidlabs.github.io/corvid-agent-nano/badges/coverage.json)
 [![GitHub stars](https://img.shields.io/github/stars/CorvidLabs/corvid-agent-nano?style=social)](https://github.com/CorvidLabs/corvid-agent-nano)
 [![GitHub last commit](https://img.shields.io/github/last-commit/CorvidLabs/corvid-agent-nano)](https://github.com/CorvidLabs/corvid-agent-nano/commits)
 [![GitHub issues](https://img.shields.io/github/issues/CorvidLabs/corvid-agent-nano)](https://github.com/CorvidLabs/corvid-agent-nano/issues)
