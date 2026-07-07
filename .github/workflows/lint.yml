@@ -3,17 +3,38 @@ name: Lint
 on:
   push:
     branches: [main]
+    paths:
+      - 'crates/**'
+      - 'plugins/**'
+      - 'src/**'
+      - 'tests/**'
+      - 'Cargo.toml'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/lint.yml'
   pull_request:
     branches: [main]
+    paths:
+      - 'crates/**'
+      - 'plugins/**'
+      - 'src/**'
+      - 'tests/**'
+      - 'Cargo.toml'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/lint.yml'
 
 permissions:
   contents: read
 
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   clippy:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -34,8 +55,9 @@ jobs:
 
   fmt:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable

@@ -4,7 +4,7 @@
 name = "coding-companion"
 version = "0.1.0"
 edition = "2021"
-description = "Coding companion plugin for corvid-agent — LLM-backed code analysis, review, explanation, and Q&A with project file context"
+description = "Context-aware coding companion — analyzes code, explains errors, quizzes concepts, and celebrates wins"
 
 [lib]
 crate-type = ["cdylib"]

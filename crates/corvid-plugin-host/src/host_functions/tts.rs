@@ -58,8 +58,7 @@ impl TtsBackend {
     }
 
     pub fn from_env() -> Self {
-        let backend_str =
-            std::env::var("CORVID_TTS_BACKEND").unwrap_or_else(|_| "piper".into());
+        let backend_str = std::env::var("CORVID_TTS_BACKEND").unwrap_or_else(|_| "piper".into());
         let piper_binary = std::env::var("CORVID_PIPER_BINARY")
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("piper"));
@@ -70,8 +69,8 @@ impl TtsBackend {
                     .unwrap_or_else(|| PathBuf::from("."))
                     .join("piper")
             });
-        let default_voice = std::env::var("CORVID_PIPER_VOICE")
-            .unwrap_or_else(|_| "en_US-lessac-medium".into());
+        let default_voice =
+            std::env::var("CORVID_PIPER_VOICE").unwrap_or_else(|_| "en_US-lessac-medium".into());
         Self::from_config(&backend_str, piper_binary, data_dir, default_voice)
     }
 
@@ -323,7 +322,13 @@ pub fn link(linker: &mut Linker<PluginState>) -> anyhow::Result<()> {
             };
 
             match backend.speak(&req) {
-                Ok(()) => write_tts_response(&mut caller, TtsResponse { ok: true, error: None }),
+                Ok(()) => write_tts_response(
+                    &mut caller,
+                    TtsResponse {
+                        ok: true,
+                        error: None,
+                    },
+                ),
                 Err(e) => {
                     tracing::warn!("host_tts_speak: playback failed: {e}");
                     write_tts_response(
@@ -363,7 +368,12 @@ mod tests {
     use super::*;
 
     fn mock_backend() -> TtsBackend {
-        TtsBackend::from_config("mock", PathBuf::from("piper"), PathBuf::from("/tmp"), "en_US-lessac-medium".into())
+        TtsBackend::from_config(
+            "mock",
+            PathBuf::from("piper"),
+            PathBuf::from("/tmp"),
+            "en_US-lessac-medium".into(),
+        )
     }
 
     #[test]
@@ -386,14 +396,24 @@ mod tests {
 
     #[test]
     fn from_config_piper() {
-        let b = TtsBackend::from_config("piper", PathBuf::from("piper"), PathBuf::from("/data"), "en_GB-alan-low".into());
+        let b = TtsBackend::from_config(
+            "piper",
+            PathBuf::from("piper"),
+            PathBuf::from("/data"),
+            "en_GB-alan-low".into(),
+        );
         assert_eq!(b.kind, TtsBackendKind::Piper);
         assert_eq!(b.default_voice, "en_GB-alan-low");
     }
 
     #[test]
     fn from_config_mock() {
-        let b = TtsBackend::from_config("mock", PathBuf::from("piper"), PathBuf::from("/data"), "x".into());
+        let b = TtsBackend::from_config(
+            "mock",
+            PathBuf::from("piper"),
+            PathBuf::from("/data"),
+            "x".into(),
+        );
         assert_eq!(b.kind, TtsBackendKind::Mock);
     }
 
@@ -413,7 +433,10 @@ mod tests {
 
     #[test]
     fn tts_response_roundtrip() {
-        let resp = TtsResponse { ok: true, error: None };
+        let resp = TtsResponse {
+            ok: true,
+            error: None,
+        };
         let packed = rmp_serde::to_vec(&resp).unwrap();
         let unpacked: TtsResponse = rmp_serde::from_slice(&packed).unwrap();
         assert!(unpacked.ok);
@@ -437,7 +460,11 @@ mod tests {
     #[test]
     fn speak_empty_text_mock() {
         let backend = mock_backend();
-        let req = TtsRequest { text: "".into(), voice: "".into(), speed: 1.0 };
+        let req = TtsRequest {
+            text: "".into(),
+            voice: "".into(),
+            speed: 1.0,
+        };
         assert!(backend.speak(&req).is_ok(), "mock should handle empty text");
     }
 }

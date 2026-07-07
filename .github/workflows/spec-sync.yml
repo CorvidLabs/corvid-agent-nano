@@ -3,17 +3,32 @@ name: Spec Sync
 on:
   push:
     branches: [main]
+    paths:
+      - 'specs/**'
+      - '.specsync/**'
+      - 'scripts/specsync.sh'
+      - '.github/workflows/spec-sync.yml'
   pull_request:
     branches: [main]
+    paths:
+      - 'specs/**'
+      - '.specsync/**'
+      - 'scripts/specsync.sh'
+      - '.github/workflows/spec-sync.yml'
 
 permissions:
   contents: read
 
+concurrency:
+  group: spec-sync-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   spec-sync:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Spec validation
         uses: CorvidLabs/spec-sync@v3.3.0

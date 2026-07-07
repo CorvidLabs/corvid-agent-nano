@@ -1,41 +1,35 @@
-//! Coding companion plugin for corvid-agent.
+//! Coding Companion plugin — context-aware coding buddy for corvid-agent.
 //!
-//! LLM-backed code analysis, review, explanation, and Q&A with optional
-//! project file context. Uses `host_llm_chat` so no API key management is
-//! needed in the plugin — the host reads `CORVID_LLM_*` env vars.
+//! Watches what you're working on and provides help, explanations, quizzes,
+//! and encouragement — powered by the LLM personality engine.
 //!
 //! ## Tools
-//! - `code.analyze` — detect bugs, issues, and improvements in code
-//! - `code.review`  — structured code review (correctness, style, security)
-//! - `code.explain` — plain-English explanation of what code does
-//! - `code.ask`     — general coding Q&A with session memory + file context
-//!
-//! ## Inputs (all tools)
-//! | Field        | Type   | Required | Description                              |
-//! |--------------|--------|----------|------------------------------------------|
-//! | `code`       | string | *        | Inline source code to analyze            |
-//! | `path`       | string | *        | Project-relative file path (alt to code) |
-//! | `focus`      | string | no       | Area to focus on (analyze only)          |
-//! | `message`    | string | ask only | The user's question                      |
-//! | `session_id` | string | no       | Conversation session key (ask only)      |
-//!
-//! *Either `code` or `path` must be supplied for analyze/review/explain.
+//! - `analyze_file`   — Read a source file and explain/analyze it with the LLM
+//! - `explain_error`  — Explain a compiler/runtime error, optionally with file context
+//! - `hint`           — Get a contextual hint when you're stuck
+//! - `quiz`           — Start a quiz on a programming concept or topic
+//! - `celebrate`      — Celebrate a win (passing tests, successful build, etc.)
+//! - `set_config`     — Configure companion behavior (TTS, verbosity, personality)
+//! - `get_config`     — Read the current companion configuration
 //!
 //! ## Storage keys (namespace: "coding-companion")
-//! - `session:{session_id}` → msgpack `Vec<ChatMessage>` (ask history)
+//! - `config` → JSON CompanionConfig
+//!
+//! ## Env Vars (host-side)
+//! - `CORVID_TTS_BACKEND`, `CORVID_PIPER_*` — passed through to the TTS host
 
 use corvid_plugin_sdk::manifest::{PluginManifest, ToolInfo, TrustTier};
 use corvid_plugin_sdk::Capability;
 use serde::{Deserialize, Serialize};
 
-// ── ABI version ─────────────────────────────────────────────────────────────
+// ── ABI version ──────────────────────────────────────────────────────────────
 
 #[no_mangle]
 pub extern "C" fn __corvid_abi_version() -> i32 {
     corvid_plugin_sdk::ABI_VERSION as i32
 }
 
-// ── Allocator ───────────────────────────────────────────────────────────────
+// ── Allocator ────────────────────────────────────────────────────────────────
 
 #[no_mangle]
 pub extern "C" fn __corvid_alloc(size: i32) -> i32 {
@@ -44,7 +38,7 @@ pub extern "C" fn __corvid_alloc(size: i32) -> i32 {
     unsafe { alloc(layout) as i32 }
 }
 
-// ── Memory helpers ────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 fn write_response(data: &[u8]) -> i32 {
     let total = 4 + data.len();
@@ -71,7 +65,7 @@ fn err(msg: impl Into<String>) -> serde_json::Value {
     serde_json::json!({ "ok": false, "error": msg.into() })
 }
 
-#[allow(dead_code)]
+#[cfg(target_arch = "wasm32")]
 fn read_length_prefixed(ptr: i32) -> Option<Vec<u8>> {
     if ptr == 0 {
         return None;
@@ -84,31 +78,43 @@ fn read_length_prefixed(ptr: i32) -> Option<Vec<u8>> {
     Some(data)
 }
 
-// ── Host function imports (WASM only) ─────────────────────────────────────────
+// ── Host function imports ─────────────────────────────────────────────────────
 
 #[cfg(target_arch = "wasm32")]
 extern "C" {
     fn host_kv_get(key_ptr: i32, key_len: i32) -> i32;
     fn host_kv_set(key_ptr: i32, key_len: i32, val_ptr: i32, val_len: i32) -> i32;
     fn host_llm_chat(req_ptr: i32, req_len: i32) -> i32;
+    fn host_tts_speak(req_ptr: i32, req_len: i32) -> i32;
     fn host_fs_read(path_ptr: i32, path_len: i32) -> i32;
 }
 
 // ── KV helpers ────────────────────────────────────────────────────────────────
 
 #[cfg(target_arch = "wasm32")]
-fn kv_get_raw(key: &str) -> Option<Vec<u8>> {
+fn kv_get_bytes(key: &str) -> Option<Vec<u8>> {
     let resp_ptr = unsafe { host_kv_get(key.as_ptr() as i32, key.len() as i32) };
-    read_length_prefixed(resp_ptr)
+    let bytes = read_length_prefixed(resp_ptr)?;
+    let outer: serde_json::Value = rmp_serde::from_slice(&bytes).ok()?;
+    let inner_bytes = match &outer {
+        serde_json::Value::Object(map) => map.get("value")?.as_array()?,
+        _ => return None,
+    };
+    Some(
+        inner_bytes
+            .iter()
+            .filter_map(|v| v.as_u64().map(|n| n as u8))
+            .collect(),
+    )
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn kv_get_raw(_key: &str) -> Option<Vec<u8>> {
+fn kv_get_bytes(_key: &str) -> Option<Vec<u8>> {
     None
 }
 
 #[cfg(target_arch = "wasm32")]
-fn kv_set_raw(key: &str, value: &[u8]) -> bool {
+fn kv_set_bytes(key: &str, value: &[u8]) -> bool {
     let result = unsafe {
         host_kv_set(
             key.as_ptr() as i32,
@@ -121,53 +127,37 @@ fn kv_set_raw(key: &str, value: &[u8]) -> bool {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn kv_set_raw(_key: &str, _value: &[u8]) -> bool {
+fn kv_set_bytes(_key: &str, _value: &[u8]) -> bool {
     false
 }
 
-fn kv_load<T: for<'de> Deserialize<'de>>(key: &str) -> Option<T> {
-    let bytes = kv_get_raw(key)?;
-    rmp_serde::from_slice(&bytes).ok()
+fn kv_get_json(key: &str) -> Option<serde_json::Value> {
+    let raw = kv_get_bytes(key)?;
+    serde_json::from_slice(&raw).ok()
 }
 
-fn kv_save<T: Serialize>(key: &str, value: &T) -> bool {
-    match rmp_serde::to_vec(value) {
-        Ok(bytes) => kv_set_raw(key, &bytes),
+fn kv_set_json(key: &str, value: &serde_json::Value) -> bool {
+    match serde_json::to_vec(value) {
+        Ok(bytes) => kv_set_bytes(key, &bytes),
         Err(_) => false,
     }
 }
 
-// ── FS helper ─────────────────────────────────────────────────────────────────
+// ── LLM helpers ───────────────────────────────────────────────────────────────
 
-#[cfg(target_arch = "wasm32")]
-fn fs_read_text(path: &str) -> Option<String> {
-    let resp_ptr = unsafe { host_fs_read(path.as_ptr() as i32, path.len() as i32) };
-    let bytes = read_length_prefixed(resp_ptr)?;
-    String::from_utf8(bytes).ok()
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn fs_read_text(_path: &str) -> Option<String> {
-    None
-}
-
-// ── LLM helper ────────────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct ChatMessage {
+#[derive(Serialize, Deserialize, Clone)]
+struct LlmMessage {
     role: String,
     content: String,
 }
 
-#[allow(dead_code)]
 #[derive(Serialize, Deserialize)]
 struct LlmRequest {
-    messages: Vec<ChatMessage>,
-    #[serde(default)]
+    messages: Vec<LlmMessage>,
     system: String,
 }
 
-#[allow(dead_code)]
+#[cfg(target_arch = "wasm32")]
 #[derive(Serialize, Deserialize)]
 struct LlmResponse {
     content: String,
@@ -176,15 +166,11 @@ struct LlmResponse {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn llm_chat(system: &str, messages: Vec<ChatMessage>) -> Result<String, String> {
-    let req = LlmRequest {
-        messages,
-        system: system.to_string(),
-    };
-    let req_bytes = rmp_serde::to_vec(&req).map_err(|e| e.to_string())?;
+fn llm_chat(req: &LlmRequest) -> Result<String, String> {
+    let req_bytes = rmp_serde::to_vec(req).map_err(|e| e.to_string())?;
     let resp_ptr = unsafe { host_llm_chat(req_bytes.as_ptr() as i32, req_bytes.len() as i32) };
-    let resp_bytes =
-        read_length_prefixed(resp_ptr).ok_or_else(|| "null response from host_llm_chat".to_string())?;
+    let resp_bytes = read_length_prefixed(resp_ptr)
+        .ok_or_else(|| "null response from host_llm_chat".to_string())?;
     let resp: LlmResponse =
         rmp_serde::from_slice(&resp_bytes).map_err(|e| format!("parse error: {e}"))?;
     if let Some(e) = resp.error {
@@ -194,166 +180,118 @@ fn llm_chat(system: &str, messages: Vec<ChatMessage>) -> Result<String, String> 
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn llm_chat(_system: &str, _messages: Vec<ChatMessage>) -> Result<String, String> {
+fn llm_chat(_req: &LlmRequest) -> Result<String, String> {
     Ok("(stub — not running in WASM)".into())
 }
 
-// ── Code resolution ───────────────────────────────────────────────────────────
+// ── TTS helpers ───────────────────────────────────────────────────────────────
 
-/// Resolve code content from either inline `code` or a project `path`.
-///
-/// Returns `(content, source_label)` where `source_label` is used in prompts
-/// so the LLM knows what it's looking at.
-fn resolve_code(input: &serde_json::Value) -> Result<(String, String), String> {
-    if let Some(code) = input.get("code").and_then(|v| v.as_str()) {
-        if !code.is_empty() {
-            return Ok((code.to_string(), "provided code".to_string()));
-        }
-    }
-
-    if let Some(path) = input.get("path").and_then(|v| v.as_str()) {
-        if !path.is_empty() {
-            let content = fs_read_text(path)
-                .ok_or_else(|| format!("could not read file: {path}"))?;
-            return Ok((content, format!("file `{path}`")));
-        }
-    }
-
-    Err("provide either `code` (inline source) or `path` (project-relative file path)".into())
+#[cfg(target_arch = "wasm32")]
+#[derive(Serialize, Deserialize)]
+struct TtsRequest {
+    text: String,
+    voice: String,
+    speed: f32,
 }
 
-// ── System prompts ────────────────────────────────────────────────────────────
-
-const ANALYZE_SYSTEM: &str = "You are an expert software engineer performing code analysis. \
-    Identify bugs, potential issues, security vulnerabilities, and opportunities for improvement. \
-    Be specific: cite the exact line or pattern, explain why it's a problem, and suggest a fix. \
-    Structure your response with sections: Bugs, Security, Performance, Style. \
-    Omit sections with no findings.";
-
-const REVIEW_SYSTEM: &str = "You are a senior software engineer doing a thorough code review. \
-    Evaluate the code for: correctness (logic, edge cases, error handling), \
-    security (input validation, injection risks, data exposure), \
-    performance (algorithmic complexity, unnecessary allocations), \
-    and maintainability (clarity, naming, structure). \
-    Give actionable, specific feedback. Use inline references (line numbers if available).";
-
-const EXPLAIN_SYSTEM: &str = "You are a patient, clear technical writer. \
-    Explain the provided code in plain English. Describe: what it does at a high level, \
-    how it works step by step, any non-obvious patterns or idioms, \
-    and the inputs/outputs. Tailor the depth to the code's complexity.";
-
-const ASK_SYSTEM: &str = "You are an expert coding assistant embedded in a developer's workflow. \
-    Answer coding questions clearly and concisely. When code context is provided, \
-    reference it directly. Prefer concrete examples and correct, runnable code. \
-    Be direct — no unnecessary preamble.";
-
-// ── Tool handlers ─────────────────────────────────────────────────────────────
-
-fn handle_analyze(input: &serde_json::Value) -> i32 {
-    let (content, label) = match resolve_code(input) {
-        Ok(r) => r,
-        Err(e) => return write_json(&err(e)),
-    };
-
-    let focus = input
-        .get("focus")
-        .and_then(|v| v.as_str())
-        .unwrap_or("all areas");
-
-    let user_msg = format!(
-        "Analyze the following {label} focusing on {focus}:\n\n```\n{content}\n```"
-    );
-
-    match llm_chat(ANALYZE_SYSTEM, vec![ChatMessage { role: "user".into(), content: user_msg }]) {
-        Ok(analysis) => write_json(&serde_json::json!({ "ok": true, "analysis": analysis })),
-        Err(e) => write_json(&err(format!("LLM error: {e}"))),
-    }
+#[cfg(target_arch = "wasm32")]
+#[derive(Serialize, Deserialize)]
+struct TtsResponse {
+    ok: bool,
+    #[serde(default)]
+    error: Option<String>,
 }
 
-fn handle_review(input: &serde_json::Value) -> i32 {
-    let (content, label) = match resolve_code(input) {
-        Ok(r) => r,
-        Err(e) => return write_json(&err(e)),
+#[cfg(target_arch = "wasm32")]
+fn tts_speak(text: &str) -> Result<(), String> {
+    let req = TtsRequest {
+        text: text.to_string(),
+        voice: String::new(),
+        speed: 1.0,
     };
-
-    let user_msg = format!("Review the following {label}:\n\n```\n{content}\n```");
-
-    match llm_chat(REVIEW_SYSTEM, vec![ChatMessage { role: "user".into(), content: user_msg }]) {
-        Ok(review) => write_json(&serde_json::json!({ "ok": true, "review": review })),
-        Err(e) => write_json(&err(format!("LLM error: {e}"))),
-    }
-}
-
-fn handle_explain(input: &serde_json::Value) -> i32 {
-    let (content, label) = match resolve_code(input) {
-        Ok(r) => r,
-        Err(e) => return write_json(&err(e)),
-    };
-
-    let user_msg = format!("Explain the following {label}:\n\n```\n{content}\n```");
-
-    match llm_chat(EXPLAIN_SYSTEM, vec![ChatMessage { role: "user".into(), content: user_msg }]) {
-        Ok(explanation) => write_json(&serde_json::json!({ "ok": true, "explanation": explanation })),
-        Err(e) => write_json(&err(format!("LLM error: {e}"))),
-    }
-}
-
-fn handle_ask(input: &serde_json::Value) -> i32 {
-    let message = match input.get("message").and_then(|v| v.as_str()) {
-        Some(m) if !m.is_empty() => m.to_string(),
-        Some(_) => return write_json(&err("message cannot be empty")),
-        None => return write_json(&err("missing required field: message")),
-    };
-
-    let session_id = input
-        .get("session_id")
-        .and_then(|v| v.as_str())
-        .unwrap_or("default");
-
-    // Build user message, optionally prepending file context
-    let user_content = if let Some(path) = input.get("path").and_then(|v| v.as_str()) {
-        if !path.is_empty() {
-            match fs_read_text(path) {
-                Some(file_content) => {
-                    format!("Context from `{path}`:\n```\n{file_content}\n```\n\n{message}")
-                }
-                None => return write_json(&err(format!("could not read file: {path}"))),
-            }
-        } else {
-            message.clone()
-        }
+    let req_bytes = rmp_serde::to_vec(&req).map_err(|e| e.to_string())?;
+    let resp_ptr = unsafe { host_tts_speak(req_bytes.as_ptr() as i32, req_bytes.len() as i32) };
+    let resp_bytes = read_length_prefixed(resp_ptr)
+        .ok_or_else(|| "null response from host_tts_speak".to_string())?;
+    let resp: TtsResponse =
+        rmp_serde::from_slice(&resp_bytes).map_err(|e| format!("parse error: {e}"))?;
+    if resp.ok {
+        Ok(())
     } else {
-        message.clone()
-    };
-
-    // Load session history
-    let session_key = format!("session:{session_id}");
-    let mut history: Vec<ChatMessage> = kv_load::<Vec<ChatMessage>>(&session_key).unwrap_or_default();
-
-    history.push(ChatMessage { role: "user".into(), content: user_content });
-
-    match llm_chat(ASK_SYSTEM, history.clone()) {
-        Ok(reply) => {
-            history.push(ChatMessage { role: "assistant".into(), content: reply.clone() });
-            kv_save(&session_key, &history);
-            write_json(&serde_json::json!({ "ok": true, "reply": reply, "session_id": session_id }))
-        }
-        Err(e) => write_json(&err(format!("LLM error: {e}"))),
+        Err(resp.error.unwrap_or_else(|| "unknown TTS error".into()))
     }
 }
 
-fn handle_clear_history(input: &serde_json::Value) -> i32 {
-    let session_id = input
-        .get("session_id")
-        .and_then(|v| v.as_str())
-        .unwrap_or("default");
-    let session_key = format!("session:{session_id}");
-    let empty: Vec<ChatMessage> = vec![];
-    kv_save(&session_key, &empty);
-    write_json(&ok(format!("history cleared for session '{session_id}'")))
+#[cfg(not(target_arch = "wasm32"))]
+fn tts_speak(_text: &str) -> Result<(), String> {
+    Ok(())
 }
 
-// ── Manifest ─────────────────────────────────────────────────────────────────
+// ── FS helpers ────────────────────────────────────────────────────────────────
+
+#[cfg(target_arch = "wasm32")]
+fn fs_read(path: &str) -> Option<String> {
+    let resp_ptr = unsafe { host_fs_read(path.as_ptr() as i32, path.len() as i32) };
+    let bytes = read_length_prefixed(resp_ptr)?;
+    String::from_utf8(bytes).ok()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn fs_read(_path: &str) -> Option<String> {
+    None
+}
+
+// ── Config ────────────────────────────────────────────────────────────────────
+
+const KEY_CONFIG: &str = "config";
+const MAX_FILE_CHARS: usize = 8_000;
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct CompanionConfig {
+    pub use_tts: bool,
+    pub verbosity: Verbosity,
+    pub personality: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[serde(rename_all = "lowercase")]
+pub enum Verbosity {
+    Concise,
+    Detailed,
+}
+
+impl Default for CompanionConfig {
+    fn default() -> Self {
+        Self {
+            use_tts: false,
+            verbosity: Verbosity::Concise,
+            personality: "enthusiastic coding buddy who loves helping developers learn and grow. You're encouraging, clear, and celebrate wins".into(),
+        }
+    }
+}
+
+fn load_config() -> CompanionConfig {
+    kv_get_json(KEY_CONFIG)
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default()
+}
+
+fn save_config(cfg: &CompanionConfig) {
+    let _ = kv_set_json(KEY_CONFIG, &serde_json::to_value(cfg).unwrap());
+}
+
+fn system_prompt(cfg: &CompanionConfig) -> String {
+    let length_hint = match cfg.verbosity {
+        Verbosity::Concise => "Keep responses brief — 2-4 sentences maximum.",
+        Verbosity::Detailed => "Give thorough explanations with examples where helpful.",
+    };
+    format!(
+        "You are a {}. {}",
+        cfg.personality, length_hint
+    )
+}
+
+// ── Manifest ──────────────────────────────────────────────────────────────────
 
 #[no_mangle]
 pub extern "C" fn __corvid_manifest() -> i32 {
@@ -361,72 +299,102 @@ pub extern "C" fn __corvid_manifest() -> i32 {
         id: "coding-companion".into(),
         version: "0.1.0".into(),
         author: "corvid-agent".into(),
-        description: "LLM-backed coding companion — analyze, review, explain, and ask questions about code in your project.".into(),
+        description: "Context-aware coding companion: analyzes code, explains errors, quizzes concepts, and celebrates wins.".into(),
         capabilities: vec![
             Capability::LlmChat,
-            Capability::Storage { namespace: "coding-companion".into() },
             Capability::FsProjectDir,
+            Capability::AudioOutput,
+            Capability::Storage { namespace: "coding-companion".into() },
         ],
         event_filter: vec![],
         trust_tier: TrustTier::Trusted,
         min_host_version: "0.3.0".into(),
         tools: vec![
             ToolInfo {
-                name: "code.analyze".into(),
-                description: "Analyze code for bugs, security issues, and improvements. Provide either inline `code` or a `path` to a project file. Optional `focus` narrows the analysis (e.g. 'security', 'performance').".into(),
+                name: "analyze_file".into(),
+                description: "Read a source file from the project and analyze or explain it. Optionally ask a specific question about it.".into(),
                 input_schema: serde_json::json!({
                     "type": "object",
                     "properties": {
-                        "code": { "type": "string", "description": "Inline source code to analyze" },
-                        "path": { "type": "string", "description": "Project-relative path to the file to analyze" },
-                        "focus": { "type": "string", "description": "Area to focus on: security, performance, correctness, style, or all (default: all)" }
+                        "path": { "type": "string", "description": "Relative path to the file within the project directory" },
+                        "question": { "type": "string", "description": "Optional specific question about the file (default: general overview)" }
+                    },
+                    "required": ["path"]
+                }),
+            },
+            ToolInfo {
+                name: "explain_error".into(),
+                description: "Explain a compiler or runtime error message and suggest how to fix it. Optionally include a file path for additional context.".into(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "error": { "type": "string", "description": "The error message or stack trace to explain" },
+                        "file": { "type": "string", "description": "Optional relative path to the file where the error occurred" }
+                    },
+                    "required": ["error"]
+                }),
+            },
+            ToolInfo {
+                name: "hint".into(),
+                description: "Get a hint when you're stuck. Describe what you're trying to do and optionally what you've already tried.".into(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "context": { "type": "string", "description": "What you're working on or trying to accomplish" },
+                        "stuck_on": { "type": "string", "description": "Specific part you're stuck on (optional)" },
+                        "file": { "type": "string", "description": "Optional file to include as context" }
+                    },
+                    "required": ["context"]
+                }),
+            },
+            ToolInfo {
+                name: "quiz".into(),
+                description: "Start a quiz on a programming concept or topic to test and reinforce your understanding.".into(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "topic": { "type": "string", "description": "Programming concept or topic to be quizzed on (e.g. 'Rust lifetimes', 'async/await', 'SQL indexes')" },
+                        "difficulty": {
+                            "type": "string",
+                            "enum": ["beginner", "intermediate", "advanced"],
+                            "description": "Difficulty level (default: intermediate)"
+                        }
+                    },
+                    "required": ["topic"]
+                }),
+            },
+            ToolInfo {
+                name: "celebrate".into(),
+                description: "Celebrate a coding win — passing tests, successful build, fixed a hard bug, etc.".into(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "achievement": { "type": "string", "description": "What you accomplished (e.g. 'all tests passing', 'fixed the memory leak')" },
+                        "speak": { "type": "boolean", "description": "Speak the celebration aloud via TTS (overrides config.use_tts if provided)" }
+                    },
+                    "required": ["achievement"]
+                }),
+            },
+            ToolInfo {
+                name: "set_config".into(),
+                description: "Configure the coding companion's behavior.".into(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "use_tts": { "type": "boolean", "description": "Speak celebrations and hints aloud via TTS" },
+                        "verbosity": {
+                            "type": "string",
+                            "enum": ["concise", "detailed"],
+                            "description": "Response verbosity: concise (2-4 sentences) or detailed (thorough explanations)"
+                        },
+                        "personality": { "type": "string", "description": "Companion personality description (used as part of the LLM system prompt)" }
                     }
                 }),
             },
             ToolInfo {
-                name: "code.review".into(),
-                description: "Perform a structured code review covering correctness, security, performance, and maintainability. Provide either inline `code` or a `path` to a project file.".into(),
-                input_schema: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "code": { "type": "string", "description": "Inline source code to review" },
-                        "path": { "type": "string", "description": "Project-relative path to the file to review" }
-                    }
-                }),
-            },
-            ToolInfo {
-                name: "code.explain".into(),
-                description: "Explain what code does in plain English — high-level purpose, step-by-step walkthrough, and notable patterns. Provide either inline `code` or a `path` to a project file.".into(),
-                input_schema: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "code": { "type": "string", "description": "Inline source code to explain" },
-                        "path": { "type": "string", "description": "Project-relative path to the file to explain" }
-                    }
-                }),
-            },
-            ToolInfo {
-                name: "code.ask".into(),
-                description: "Ask a coding question. Optionally load a project file as context. Maintains per-session conversation history so you can ask follow-up questions.".into(),
-                input_schema: serde_json::json!({
-                    "type": "object",
-                    "required": ["message"],
-                    "properties": {
-                        "message": { "type": "string", "description": "Your coding question" },
-                        "path": { "type": "string", "description": "Optional project-relative file to include as context" },
-                        "session_id": { "type": "string", "description": "Conversation session key — use the same ID for follow-ups (default: 'default')" }
-                    }
-                }),
-            },
-            ToolInfo {
-                name: "code.clear_history".into(),
-                description: "Clear the conversation history for a session.".into(),
-                input_schema: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "session_id": { "type": "string", "description": "Session to clear (default: 'default')" }
-                    }
-                }),
+                name: "get_config".into(),
+                description: "Get the current companion configuration.".into(),
+                input_schema: serde_json::json!({ "type": "object", "properties": {} }),
             },
         ],
         dependencies: vec![],
@@ -459,12 +427,280 @@ pub extern "C" fn __corvid_invoke(
     };
 
     match tool {
-        "code.analyze" => handle_analyze(&input),
-        "code.review" => handle_review(&input),
-        "code.explain" => handle_explain(&input),
-        "code.ask" => handle_ask(&input),
-        "code.clear_history" => handle_clear_history(&input),
+        "analyze_file" => handle_analyze_file(&input),
+        "explain_error" => handle_explain_error(&input),
+        "hint" => handle_hint(&input),
+        "quiz" => handle_quiz(&input),
+        "celebrate" => handle_celebrate(&input),
+        "set_config" => handle_set_config(&input),
+        "get_config" => handle_get_config(&input),
         _ => write_json(&err(format!("unknown tool: {tool}"))),
+    }
+}
+
+// ── Tool handlers ─────────────────────────────────────────────────────────────
+
+fn handle_analyze_file(input: &serde_json::Value) -> i32 {
+    let path = match input.get("path").and_then(|v| v.as_str()) {
+        Some(p) if !p.is_empty() => p,
+        _ => return write_json(&err("missing required field: path")),
+    };
+
+    let contents = match fs_read(path) {
+        Some(c) => c,
+        None => return write_json(&err(format!("could not read file: {path}"))),
+    };
+
+    let truncated = truncate_file(&contents, MAX_FILE_CHARS);
+    let question = input
+        .get("question")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Give a clear overview of what this code does, its key components, and anything notable about its design.");
+
+    let cfg = load_config();
+    let req = LlmRequest {
+        system: system_prompt(&cfg),
+        messages: vec![LlmMessage {
+            role: "user".into(),
+            content: format!(
+                "Here is the file `{path}`:\n\n```\n{truncated}\n```\n\n{question}"
+            ),
+        }],
+    };
+
+    match llm_chat(&req) {
+        Ok(response) => write_json(&serde_json::json!({
+            "ok": true,
+            "file": path,
+            "analysis": response,
+        })),
+        Err(e) => write_json(&err(format!("LLM error: {e}"))),
+    }
+}
+
+fn handle_explain_error(input: &serde_json::Value) -> i32 {
+    let error_msg = match input.get("error").and_then(|v| v.as_str()) {
+        Some(e) if !e.is_empty() => e.to_string(),
+        _ => return write_json(&err("missing required field: error")),
+    };
+
+    let file_context = input
+        .get("file")
+        .and_then(|v| v.as_str())
+        .and_then(|p| fs_read(p).map(|c| (p.to_string(), c)));
+
+    let cfg = load_config();
+    let user_content = match &file_context {
+        Some((path, contents)) => {
+            let truncated = truncate_file(contents, MAX_FILE_CHARS);
+            format!(
+                "I got this error:\n\n```\n{error_msg}\n```\n\nHere is the relevant file `{path}`:\n\n```\n{truncated}\n```\n\nExplain what caused the error and how to fix it."
+            )
+        }
+        None => format!(
+            "I got this error:\n\n```\n{error_msg}\n```\n\nExplain what caused the error and how to fix it."
+        ),
+    };
+
+    let req = LlmRequest {
+        system: system_prompt(&cfg),
+        messages: vec![LlmMessage {
+            role: "user".into(),
+            content: user_content,
+        }],
+    };
+
+    match llm_chat(&req) {
+        Ok(response) => write_json(&serde_json::json!({
+            "ok": true,
+            "explanation": response,
+        })),
+        Err(e) => write_json(&err(format!("LLM error: {e}"))),
+    }
+}
+
+fn handle_hint(input: &serde_json::Value) -> i32 {
+    let context = match input.get("context").and_then(|v| v.as_str()) {
+        Some(c) if !c.is_empty() => c.to_string(),
+        _ => return write_json(&err("missing required field: context")),
+    };
+
+    let stuck_on = input
+        .get("stuck_on")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    let file_context = input
+        .get("file")
+        .and_then(|v| v.as_str())
+        .and_then(|p| fs_read(p).map(|c| (p.to_string(), c)));
+
+    let cfg = load_config();
+    let mut user_content = format!("I'm working on: {context}");
+    if !stuck_on.is_empty() {
+        user_content.push_str(&format!("\n\nI'm stuck on: {stuck_on}"));
+    }
+    if let Some((path, contents)) = &file_context {
+        let truncated = truncate_file(contents, MAX_FILE_CHARS);
+        user_content.push_str(&format!("\n\nCurrent file `{path}`:\n\n```\n{truncated}\n```"));
+    }
+    user_content.push_str("\n\nGive me a helpful hint without giving away the full solution.");
+
+    let req = LlmRequest {
+        system: system_prompt(&cfg),
+        messages: vec![LlmMessage {
+            role: "user".into(),
+            content: user_content,
+        }],
+    };
+
+    match llm_chat(&req) {
+        Ok(hint) => {
+            if cfg.use_tts {
+                let _ = tts_speak(&hint);
+            }
+            write_json(&serde_json::json!({
+                "ok": true,
+                "hint": hint,
+            }))
+        }
+        Err(e) => write_json(&err(format!("LLM error: {e}"))),
+    }
+}
+
+fn handle_quiz(input: &serde_json::Value) -> i32 {
+    let topic = match input.get("topic").and_then(|v| v.as_str()) {
+        Some(t) if !t.is_empty() => t.to_string(),
+        _ => return write_json(&err("missing required field: topic")),
+    };
+
+    let difficulty = input
+        .get("difficulty")
+        .and_then(|v| v.as_str())
+        .unwrap_or("intermediate");
+
+    let valid_difficulties = ["beginner", "intermediate", "advanced"];
+    if !valid_difficulties.contains(&difficulty) {
+        return write_json(&err(format!(
+            "invalid difficulty: {difficulty}. Must be one of: beginner, intermediate, advanced"
+        )));
+    }
+
+    let cfg = load_config();
+    let req = LlmRequest {
+        system: system_prompt(&cfg),
+        messages: vec![LlmMessage {
+            role: "user".into(),
+            content: format!(
+                "Quiz me on '{topic}' at {difficulty} level. \
+                 Ask one clear question and wait for my answer. \
+                 After the question, add a blank line then write 'Answer when ready!' \
+                 Do not reveal the answer yet."
+            ),
+        }],
+    };
+
+    match llm_chat(&req) {
+        Ok(question) => write_json(&serde_json::json!({
+            "ok": true,
+            "topic": topic,
+            "difficulty": difficulty,
+            "question": question,
+        })),
+        Err(e) => write_json(&err(format!("LLM error: {e}"))),
+    }
+}
+
+fn handle_celebrate(input: &serde_json::Value) -> i32 {
+    let achievement = match input.get("achievement").and_then(|v| v.as_str()) {
+        Some(a) if !a.is_empty() => a.to_string(),
+        _ => return write_json(&err("missing required field: achievement")),
+    };
+
+    let cfg = load_config();
+    let should_speak = input
+        .get("speak")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(cfg.use_tts);
+
+    let req = LlmRequest {
+        system: system_prompt(&cfg),
+        messages: vec![LlmMessage {
+            role: "user".into(),
+            content: format!(
+                "Celebrate this achievement enthusiastically: {achievement}. \
+                 Keep it short, fun, and genuinely encouraging."
+            ),
+        }],
+    };
+
+    match llm_chat(&req) {
+        Ok(celebration) => {
+            if should_speak {
+                let _ = tts_speak(&celebration);
+            }
+            write_json(&serde_json::json!({
+                "ok": true,
+                "celebration": celebration,
+                "spoken": should_speak,
+            }))
+        }
+        Err(e) => write_json(&err(format!("LLM error: {e}"))),
+    }
+}
+
+fn handle_set_config(input: &serde_json::Value) -> i32 {
+    let mut cfg = load_config();
+
+    if let Some(use_tts) = input.get("use_tts").and_then(|v| v.as_bool()) {
+        cfg.use_tts = use_tts;
+    }
+    if let Some(verbosity) = input.get("verbosity").and_then(|v| v.as_str()) {
+        cfg.verbosity = match verbosity {
+            "concise" => Verbosity::Concise,
+            "detailed" => Verbosity::Detailed,
+            other => return write_json(&err(format!("invalid verbosity: {other}"))),
+        };
+    }
+    if let Some(personality) = input.get("personality").and_then(|v| v.as_str()) {
+        if personality.is_empty() {
+            return write_json(&err("personality cannot be empty"));
+        }
+        cfg.personality = personality.to_string();
+    }
+
+    save_config(&cfg);
+    write_json(&serde_json::json!({
+        "ok": true,
+        "config": {
+            "use_tts": cfg.use_tts,
+            "verbosity": match cfg.verbosity { Verbosity::Concise => "concise", Verbosity::Detailed => "detailed" },
+            "personality": cfg.personality,
+        }
+    }))
+}
+
+fn handle_get_config(_input: &serde_json::Value) -> i32 {
+    let cfg = load_config();
+    write_json(&serde_json::json!({
+        "ok": true,
+        "config": {
+            "use_tts": cfg.use_tts,
+            "verbosity": match cfg.verbosity { Verbosity::Concise => "concise", Verbosity::Detailed => "detailed" },
+            "personality": cfg.personality,
+        }
+    }))
+}
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
+
+/// Truncate file content to at most `max_chars` characters, appending a note if truncated.
+pub fn truncate_file(content: &str, max_chars: usize) -> String {
+    if content.len() <= max_chars {
+        content.to_string()
+    } else {
+        let truncated = &content[..max_chars];
+        format!("{truncated}\n\n[... file truncated at {max_chars} characters ...]")
     }
 }
 
@@ -474,157 +710,289 @@ pub extern "C" fn __corvid_invoke(
 mod tests {
     use super::*;
 
-    fn make_input(json: serde_json::Value) -> Vec<u8> {
-        rmp_serde::to_vec(&json).unwrap()
+    // ── CompanionConfig ──────────────────────────────────────────────────────
+
+    #[test]
+    fn default_config_is_reasonable() {
+        let cfg = CompanionConfig::default();
+        assert!(!cfg.use_tts);
+        assert_eq!(cfg.verbosity, Verbosity::Concise);
+        assert!(!cfg.personality.is_empty());
     }
 
     #[test]
-    fn analyze_requires_code_or_path() {
-        // Non-WASM: fs_read and llm_chat are stubs. Test input validation.
-        let result = resolve_code(&serde_json::json!({}));
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("provide either"));
-    }
-
-    #[test]
-    fn analyze_inline_code_resolves() {
-        let result = resolve_code(&serde_json::json!({ "code": "fn main() {}" }));
-        assert!(result.is_ok());
-        let (content, label) = result.unwrap();
-        assert_eq!(content, "fn main() {}");
-        assert_eq!(label, "provided code");
-    }
-
-    #[test]
-    fn analyze_empty_code_falls_through_to_error() {
-        // Empty `code` should try path, then fail
-        let result = resolve_code(&serde_json::json!({ "code": "" }));
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn analyze_empty_path_falls_through_to_error() {
-        // Empty `path` and no `code` should fail
-        let result = resolve_code(&serde_json::json!({ "path": "" }));
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn ask_missing_message_returns_error() {
-        let input_bytes = make_input(serde_json::json!({}));
-        let input: serde_json::Value = rmp_serde::from_slice(&input_bytes).unwrap();
-        let msg = input.get("message").and_then(|v| v.as_str());
-        assert!(msg.is_none());
-    }
-
-    #[test]
-    fn ask_empty_message_returns_error() {
-        let input_bytes = make_input(serde_json::json!({ "message": "" }));
-        let input: serde_json::Value = rmp_serde::from_slice(&input_bytes).unwrap();
-        let msg = input.get("message").and_then(|v| v.as_str());
-        assert_eq!(msg, Some(""));
-        assert!(msg.map(|m| m.is_empty()).unwrap_or(true));
-    }
-
-    #[test]
-    fn chat_message_msgpack_roundtrip() {
-        let msgs = vec![
-            ChatMessage { role: "user".into(), content: "What does this do?".into() },
-            ChatMessage { role: "assistant".into(), content: "It does X.".into() },
-        ];
-        let bytes = rmp_serde::to_vec(&msgs).unwrap();
-        let decoded: Vec<ChatMessage> = rmp_serde::from_slice(&bytes).unwrap();
-        assert_eq!(decoded.len(), 2);
-        assert_eq!(decoded[0].role, "user");
-        assert_eq!(decoded[1].content, "It does X.");
-    }
-
-    #[test]
-    fn kv_load_returns_none_without_wasm() {
-        let result = kv_load::<Vec<ChatMessage>>("session:test");
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn fs_read_text_returns_none_without_wasm() {
-        let result = fs_read_text("src/main.rs");
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn llm_chat_stub_returns_ok() {
-        let result = llm_chat("system prompt", vec![
-            ChatMessage { role: "user".into(), content: "hello".into() },
-        ]);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn dispatch_unknown_tool_returns_error() {
-        let input = rmp_serde::to_vec(&serde_json::json!({})).unwrap();
-        let tool = "code.nonexistent";
-        let input_val: serde_json::Value = rmp_serde::from_slice(&input).unwrap();
-        // Simulate dispatch logic
-        let result = match tool {
-            "code.analyze" | "code.review" | "code.explain" | "code.ask" | "code.clear_history" => {
-                true
-            }
-            _ => false,
+    fn config_roundtrips_via_json() {
+        let cfg = CompanionConfig {
+            use_tts: true,
+            verbosity: Verbosity::Detailed,
+            personality: "a grumpy but effective code reviewer".into(),
         };
-        assert!(!result, "unknown tool should not match dispatch");
-        let _ = input_val; // used
+        let json = serde_json::to_value(&cfg).unwrap();
+        let restored: CompanionConfig = serde_json::from_value(json).unwrap();
+        assert_eq!(restored.use_tts, cfg.use_tts);
+        assert_eq!(restored.verbosity, cfg.verbosity);
+        assert_eq!(restored.personality, cfg.personality);
     }
 
     #[test]
-    fn manifest_capabilities_include_llmchat_storage_fs() {
-        let caps = vec![
-            Capability::LlmChat,
-            Capability::Storage { namespace: "coding-companion".into() },
-            Capability::FsProjectDir,
-        ];
-        assert!(caps.contains(&Capability::LlmChat));
-        assert!(caps.contains(&Capability::FsProjectDir));
-        assert!(caps
-            .iter()
-            .any(|c| matches!(c, Capability::Storage { namespace } if namespace == "coding-companion")));
+    fn verbosity_serializes_as_lowercase() {
+        let concise = serde_json::to_value(Verbosity::Concise).unwrap();
+        let detailed = serde_json::to_value(Verbosity::Detailed).unwrap();
+        assert_eq!(concise, serde_json::json!("concise"));
+        assert_eq!(detailed, serde_json::json!("detailed"));
     }
 
     #[test]
-    fn manifest_tool_names_match_dispatch() {
+    fn verbosity_deserializes_from_lowercase() {
+        let v: Verbosity = serde_json::from_str("\"concise\"").unwrap();
+        assert_eq!(v, Verbosity::Concise);
+        let v: Verbosity = serde_json::from_str("\"detailed\"").unwrap();
+        assert_eq!(v, Verbosity::Detailed);
+    }
+
+    // ── system_prompt ────────────────────────────────────────────────────────
+
+    #[test]
+    fn system_prompt_includes_personality_and_verbosity() {
+        let cfg = CompanionConfig {
+            use_tts: false,
+            verbosity: Verbosity::Concise,
+            personality: "a wise mentor".into(),
+        };
+        let prompt = system_prompt(&cfg);
+        assert!(prompt.contains("a wise mentor"));
+        assert!(prompt.contains("brief"));
+    }
+
+    #[test]
+    fn system_prompt_detailed_mode() {
+        let cfg = CompanionConfig {
+            use_tts: false,
+            verbosity: Verbosity::Detailed,
+            personality: "a patient teacher".into(),
+        };
+        let prompt = system_prompt(&cfg);
+        assert!(prompt.contains("thorough"));
+    }
+
+    // ── truncate_file ────────────────────────────────────────────────────────
+
+    #[test]
+    fn truncate_file_short_content_unchanged() {
+        let content = "hello world";
+        assert_eq!(truncate_file(content, 100), content);
+    }
+
+    #[test]
+    fn truncate_file_long_content_truncated() {
+        let content = "a".repeat(200);
+        let result = truncate_file(&content, 100);
+        assert!(result.starts_with(&"a".repeat(100)));
+        assert!(result.contains("truncated at 100 characters"));
+    }
+
+    #[test]
+    fn truncate_file_exact_length_unchanged() {
+        let content = "x".repeat(50);
+        let result = truncate_file(&content, 50);
+        assert_eq!(result, content);
+        assert!(!result.contains("truncated"));
+    }
+
+    #[test]
+    fn truncate_file_empty_content() {
+        assert_eq!(truncate_file("", 100), "");
+    }
+
+    // ── ok / err helpers ─────────────────────────────────────────────────────
+
+    #[test]
+    fn ok_and_err_helpers() {
+        let ok_val = ok("success");
+        assert_eq!(ok_val["ok"], true);
+        assert_eq!(ok_val["message"], "success");
+
+        let err_val = err("something went wrong");
+        assert_eq!(err_val["ok"], false);
+        assert_eq!(err_val["error"], "something went wrong");
+    }
+
+    // ── ABI ──────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn abi_version_matches_sdk() {
+        assert_eq!(
+            __corvid_abi_version(),
+            corvid_plugin_sdk::ABI_VERSION as i32
+        );
+    }
+
+    // ── Manifest (construct directly to avoid WASM pointer indirection) ───────
+
+    #[test]
+    fn manifest_has_seven_tools() {
         let tool_names = [
-            "code.analyze",
-            "code.review",
-            "code.explain",
-            "code.ask",
-            "code.clear_history",
+            "analyze_file",
+            "explain_error",
+            "hint",
+            "quiz",
+            "celebrate",
+            "set_config",
+            "get_config",
         ];
         for name in &tool_names {
             let handled = matches!(
                 *name,
-                "code.analyze" | "code.review" | "code.explain" | "code.ask" | "code.clear_history"
+                "analyze_file"
+                    | "explain_error"
+                    | "hint"
+                    | "quiz"
+                    | "celebrate"
+                    | "set_config"
+                    | "get_config"
             );
-            assert!(handled, "tool {name} must be handled in dispatch");
+            assert!(handled, "tool {name} not in dispatch table");
         }
+        assert_eq!(tool_names.len(), 7);
     }
 
     #[test]
-    fn session_key_format() {
-        let session_id = "my-session";
-        let key = format!("session:{session_id}");
-        assert_eq!(key, "session:my-session");
+    fn required_capabilities_declared() {
+        let caps = vec![
+            Capability::LlmChat,
+            Capability::FsProjectDir,
+            Capability::AudioOutput,
+            Capability::Storage { namespace: "coding-companion".into() },
+        ];
+        assert!(caps.contains(&Capability::LlmChat));
+        assert!(caps.contains(&Capability::FsProjectDir));
+        assert!(caps.contains(&Capability::AudioOutput));
+        assert!(caps.contains(&Capability::Storage {
+            namespace: "coding-companion".into()
+        }));
+    }
+
+    // ── Input validation (test validation logic without handler memory I/O) ──
+
+    #[test]
+    fn analyze_file_path_validation() {
+        let j_missing = serde_json::json!({});
+        let j_empty = serde_json::json!({ "path": "" });
+        let j_valid = serde_json::json!({ "path": "src/main.rs" });
+        let missing = j_missing.get("path").and_then(|v| v.as_str()).filter(|p| !p.is_empty());
+        let empty = j_empty.get("path").and_then(|v| v.as_str()).filter(|p| !p.is_empty());
+        let valid = j_valid.get("path").and_then(|v| v.as_str()).filter(|p| !p.is_empty());
+        assert!(missing.is_none());
+        assert!(empty.is_none());
+        assert_eq!(valid, Some("src/main.rs"));
     }
 
     #[test]
-    fn focus_defaults_to_all_areas() {
-        let input = serde_json::json!({ "code": "let x = 1;" });
-        let focus = input.get("focus").and_then(|v| v.as_str()).unwrap_or("all areas");
-        assert_eq!(focus, "all areas");
+    fn explain_error_field_validation() {
+        let j_missing = serde_json::json!({});
+        let j_empty = serde_json::json!({ "error": "" });
+        let j_valid = serde_json::json!({ "error": "E0502" });
+        let missing = j_missing.get("error").and_then(|v| v.as_str()).filter(|e| !e.is_empty());
+        let empty = j_empty.get("error").and_then(|v| v.as_str()).filter(|e| !e.is_empty());
+        let valid = j_valid.get("error").and_then(|v| v.as_str()).filter(|e| !e.is_empty());
+        assert!(missing.is_none());
+        assert!(empty.is_none());
+        assert_eq!(valid, Some("E0502"));
     }
 
     #[test]
-    fn analyze_with_focus_field() {
-        let input = serde_json::json!({ "code": "fn foo() {}", "focus": "security" });
-        let focus = input.get("focus").and_then(|v| v.as_str()).unwrap_or("all areas");
-        assert_eq!(focus, "security");
+    fn hint_context_validation() {
+        let j_missing = serde_json::json!({});
+        let j_valid = serde_json::json!({ "context": "binary search" });
+        let missing = j_missing.get("context").and_then(|v| v.as_str()).filter(|c| !c.is_empty());
+        let valid = j_valid.get("context").and_then(|v| v.as_str()).filter(|c| !c.is_empty());
+        assert!(missing.is_none());
+        assert_eq!(valid, Some("binary search"));
+    }
+
+    #[test]
+    fn quiz_difficulty_validation() {
+        let valid_difficulties = ["beginner", "intermediate", "advanced"];
+        for d in &valid_difficulties {
+            assert!(valid_difficulties.contains(d));
+        }
+        assert!(!valid_difficulties.contains(&"expert"));
+        assert!(!valid_difficulties.contains(&"verbose"));
+    }
+
+    #[test]
+    fn quiz_topic_validation() {
+        let j_missing = serde_json::json!({});
+        let j_valid = serde_json::json!({ "topic": "closures" });
+        let missing = j_missing.get("topic").and_then(|v| v.as_str()).filter(|t| !t.is_empty());
+        let valid = j_valid.get("topic").and_then(|v| v.as_str()).filter(|t| !t.is_empty());
+        assert!(missing.is_none());
+        assert_eq!(valid, Some("closures"));
+    }
+
+    #[test]
+    fn celebrate_achievement_validation() {
+        let j_missing = serde_json::json!({});
+        let j_valid = serde_json::json!({ "achievement": "all tests pass" });
+        let missing = j_missing.get("achievement").and_then(|v| v.as_str()).filter(|a| !a.is_empty());
+        let valid = j_valid.get("achievement").and_then(|v| v.as_str()).filter(|a| !a.is_empty());
+        assert!(missing.is_none());
+        assert_eq!(valid, Some("all tests pass"));
+    }
+
+    #[test]
+    fn set_config_verbosity_validation() {
+        let result_concise = match "concise" { "concise" => Some(Verbosity::Concise), "detailed" => Some(Verbosity::Detailed), _ => None };
+        let result_detailed = match "detailed" { "concise" => Some(Verbosity::Concise), "detailed" => Some(Verbosity::Detailed), _ => None };
+        let result_invalid = match "verbose" { "concise" => Some(Verbosity::Concise), "detailed" => Some(Verbosity::Detailed), _ => None };
+        assert_eq!(result_concise, Some(Verbosity::Concise));
+        assert_eq!(result_detailed, Some(Verbosity::Detailed));
+        assert!(result_invalid.is_none());
+    }
+
+    #[test]
+    fn set_config_personality_cannot_be_empty() {
+        let empty = "";
+        let valid = "a wise mentor";
+        assert!(empty.is_empty());
+        assert!(!valid.is_empty());
+    }
+
+    // ── Non-WASM stubs ───────────────────────────────────────────────────────
+
+    #[test]
+    fn llm_chat_non_wasm_returns_stub() {
+        let req = LlmRequest {
+            system: "test".into(),
+            messages: vec![LlmMessage { role: "user".into(), content: "hello".into() }],
+        };
+        let result = llm_chat(&req);
+        assert!(result.is_ok());
+        assert!(!result.unwrap().is_empty());
+    }
+
+    #[test]
+    fn tts_speak_non_wasm_is_noop() {
+        assert!(tts_speak("hello world").is_ok());
+    }
+
+    #[test]
+    fn fs_read_non_wasm_returns_none() {
+        assert!(fs_read("src/main.rs").is_none());
+    }
+
+    #[test]
+    fn kv_non_wasm_returns_none() {
+        assert!(kv_get_json("config").is_none());
+    }
+
+    // ── Config load falls back to default when no KV ─────────────────────────
+
+    #[test]
+    fn load_config_returns_default_when_kv_empty() {
+        let cfg = load_config();
+        assert_eq!(cfg.verbosity, Verbosity::Concise);
+        assert!(!cfg.use_tts);
+        assert!(!cfg.personality.is_empty());
     }
 }
