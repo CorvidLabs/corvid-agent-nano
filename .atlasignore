@@ -1,0 +1,34 @@
+# Atlas coverage scope for corvid-agent-nano.
+#
+# The specs govern the CLI binary (src/) and the plugin runtime crates
+# (crates/), not the example plugins, the integration tests, the mdBook docs
+# site (served on Pages), dev tooling, or build output. Keep those out of the
+# coverage denominator so the percentage reflects the code the specs are meant
+# to cover. Root-anchored subset of gitignore.
+
+# Build output.
+/target
+build/
+
+# mdBook docs site (built to docs/book, served on Pages).
+docs/
+
+# Integration and crate-level test suites.
+tests/
+crates/corvid-plugin-host/tests/
+
+# Example / demo plugins (hello-world, coding-companion, personality,
+# llm-personality, tts-voice) - showcased, not governed by the specs.
+plugins/
+
+# Companion Bun server test suite (verified against specs, not governed by them).
+server/plugins/rust-bridge.test.ts
+
+# Dev tooling and spec-sync metadata.
+scripts/
+.specsync/
+
+# Vendored / generated / minified.
+node_modules/
+vendor/
+*.min.*
