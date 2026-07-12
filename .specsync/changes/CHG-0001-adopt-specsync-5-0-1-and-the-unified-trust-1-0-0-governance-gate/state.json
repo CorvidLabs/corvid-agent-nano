@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "id": "CHG-0001-adopt-specsync-5-0-1-and-the-unified-trust-1-0-0-governance-gate",
+  "slug": "adopt-specsync-5-0-1-and-the-unified-trust-1-0-0-governance-gate",
+  "title": "Adopt SpecSync 5.0.1 and the unified Trust 1.0.0 governance gate",
+  "description": "Adopt SpecSync 5.0.1 and the unified Trust 1.0.0 governance gate",
+  "kind": "migration",
+  "state": "draft",
+  "base_commit": "9eb6a906bdb501c141a058b3d014d02fd32cfbad",
+  "created_at": 1783887207,
+  "updated_at": 1783887217,
+  "affected_specs": [
+    "nano-cli",
+    "transaction",
+    "plugin-cli",
+    "plugin-host",
+    "plugin-macros",
+    "plugin-personality",
+    "plugin-sdk"
+  ],
+  "affected_paths": [
+    "src/",
+    "crates/",
+    "plugins/",
+    ".github/",
+    "specs/",
+    ".specsync/",
+    "fledge.toml",
+    ".github/workflows/spec-sync.yml",
+    ".github/workflows/trust.yml",
+    ".specsync/config.toml",
+    ".specsync/sdd.json",
+    ".specsync/version",
+    "specs/binary/nano-cli.spec.md",
+    "specs/binary/transaction.spec.md",
+    "specs/plugin/plugin-cli.spec.md",
+    "specs/plugin/plugin-host.spec.md",
+    "specs/plugin/plugin-macros.spec.md",
+    "specs/plugin/plugin-personality.spec.md",
+    "specs/plugin/plugin-sdk.spec.md"
+  ],
+  "no_spec_change": false,
+  "no_spec_change_rationale": null,
+  "acceptance_criteria": [
+    "SpecSync strict check passes; all four agent integrations are installed; the immutable Trust 1.0.0 action runs as job trust; Rust formatting",
+    "clippy",
+    "workspace tests",
+    "and workspace builds remain green; standalone documentation Pages and Atlas publishing remain independent"
+  ],
+  "selected_artifacts": [
+    "context",
+    "research",
+    "design",
+    "plan",
+    "tasks",
+    "testing",
+    "docs"
+  ],
+  "dependencies": [],
+  "answers": {
+    "architecture_risk": "yes",
+    "public_contract": "no"
+  }
+}

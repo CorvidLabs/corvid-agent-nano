@@ -111,6 +111,28 @@ The Rust sidecar binary that hosts WASM plugins for corvid-agent. Runs as a sepa
 | `read_str` | `wasm_mem.rs` | `store`, `ptr`, `len` | `Result<String>` | Read string from WASM memory |
 | `write_response` | `wasm_mem.rs` | `store`, `data` | `Result<(i32, i32)>` | Write response to WASM memory |
 | `set` | `host_functions/storage.rs` | `backend`, `key`, `value` | async `Result<()>` | Set KV pair in storage |
+| `new` | `registry.rs` | registry parameters | `Self` | Construct a registry or state value |
+| `is_active` | `registry.rs` | `&self` | `bool` | Test whether a plugin is active |
+| `is_draining` | `registry.rs` | `&self` | `bool` | Test whether a plugin is draining |
+| `try_acquire` | `registry.rs` | `&self` | guard result | Acquire an active plugin invocation guard |
+| `drain_and_reload` | `registry.rs` | plugin parameters | async result | Drain active calls and reload a plugin |
+| `unload` | `registry.rs` | plugin id | result | Unload a registered plugin |
+| `state_str` | `registry.rs` | `&self` | `&str` | Return the lifecycle state name |
+| `register` | `registry.rs` | loaded plugin | result | Register a loaded plugin |
+| `get` | `registry.rs` | plugin id | plugin result | Resolve a registered plugin |
+| `reload` | `registry.rs` | plugin parameters | async result | Reload a registered plugin |
+| `list_manifests` | `registry.rs` | `&self` | manifest list | List registered plugin manifests |
+| `health_status` | `registry.rs` | `&self` | health data | Report registry health |
+| `len` | `registry.rs` | `&self` | `usize` | Count registered plugins |
+| `is_empty` | `registry.rs` | `&self` | `bool` | Test whether the registry is empty |
+| `check_dependencies` | `registry.rs` | manifests | result | Validate plugin dependencies |
+| `topological_order` | `registry.rs` | manifests | ordered result | Order plugins by dependency |
+| `dispatch_event_counted` | `executor.rs` | registry, event | async count | Dispatch an event and return delivery count |
+| `DbQuery` | `host_functions/db.rs` | — | struct | Read-only database query request |
+| `is_select_only` | `host_functions/db.rs` | SQL | `bool` | Validate a read-only query |
+| `FsRead` | `host_functions/fs.rs` | — | struct | Filesystem read request |
+| `ProjectDirFs` | `host_functions/fs.rs` | — | struct | Project-directory filesystem backend |
+| `validate_path` | `host_functions/fs.rs` | path | result | Validate sandboxed filesystem paths |
 
 ### Struct Methods
 

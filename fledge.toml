@@ -27,3 +27,7 @@ steps = ["fmt", "lint", "test", "build"]
 [flows.pre-commit]
 description = "Fast gate before committing"
 steps = [{ parallel = ["fmt", "lint"] }, "check-types"]
+
+[lanes.verify]
+description = "Native verification used by the unified Trust gate"
+steps = ["fmt", "lint", "test", "build"]

@@ -35,6 +35,12 @@ Command-line tool for plugin authors and operators. Scaffolds new plugin project
 |----------|-----------|---------|-------------|
 | `scaffold` | `(name: &str, author: &str, tier: TrustTier)` | `Result<PathBuf>` | Generate plugin project directory from template |
 | `validate_plugin` | `(wasm_path: &Path)` | `Result<ValidationReport>` | Full validation: ABI, manifest, capabilities, tool schemas |
+| `scaffold_in` | scaffold parameters | `Result<PathBuf>` | Scaffold a plugin in a selected parent directory |
+| `ValidationReport` | — | struct | Aggregated plugin validation result |
+| `Check` | — | struct | Individual validation check result |
+| `is_ok` | `&self` | `bool` | Report whether validation succeeded |
+| `error_count` | `&self` | `usize` | Count validation errors |
+| `validate_plugin_toml` | manifest path | `Result<ValidationReport>` | Validate a plugin manifest |
 
 ## Modules
 

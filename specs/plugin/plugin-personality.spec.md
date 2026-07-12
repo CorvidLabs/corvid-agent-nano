@@ -2,7 +2,8 @@
 module: plugin-personality
 version: 1
 status: stable
-files: []
+files:
+  - plugins/personality/src/lib.rs
 depends_on:
   - specs/plugin/plugin-sdk.spec.md
   - specs/plugin/plugin-macros.spec.md
@@ -70,6 +71,16 @@ No input fields.
 | `Message` | Single conversation turn: role (`"user"` or `"assistant"`) and content |
 | `Provider` | Enum: `Claude`, `OpenAI`, `Custom` |
 | `PersonalityPlugin` | Root plugin struct implementing `CorvidPlugin` |
+
+### Exported Functions
+
+| Function | Description |
+|----------|-------------|
+| `kv_get` | Read plugin-scoped state from host KV storage |
+| `kv_set` | Write plugin-scoped state to host KV storage |
+| `http_post` | Send an allowlisted HTTP request through the host |
+| `detect_emotion` | Derive emotion state from a response |
+| `build_system_prompt` | Build the active persona system prompt |
 
 ### KV Storage Keys
 

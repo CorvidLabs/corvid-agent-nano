@@ -29,13 +29,13 @@ When `#[corvid_plugin]` is applied to `struct MyPlugin`, the macro generates:
 
 | Export Function | Signature | Description |
 |----------------|-----------|-------------|
-| `__corvid_abi_version` | `extern "C" fn() -> i32` | Returns `corvid_plugin_sdk::ABI_VERSION` cast to `i32` |
-| `__corvid_manifest` | `extern "C" fn() -> i32` | Serializes manifest to MessagePack, returns ptr to length-prefixed buffer |
-| `__corvid_invoke` | `extern "C" fn(tool_ptr: i32, tool_len: i32, input_ptr: i32, input_len: i32) -> i32` | Routes tool call by name, returns ptr to length-prefixed msgpack result |
-| `__corvid_on_event` | `extern "C" fn(event_ptr: i32, event_len: i32) -> i32` | Deserializes `PluginEvent`, calls `on_event()`, returns 0 on success or -1 on error |
-| `__corvid_shutdown` | `extern "C" fn()` | No-op shutdown hook — called before the WASM module is torn down |
-| `__corvid_alloc` | `extern "C" fn(size: i32) -> i32` | WASM memory allocator for host→plugin data transfer |
-| `__corvid_dealloc` | `extern "C" fn(ptr: i32, size: i32)` | WASM memory deallocator for cleanup |
+| **__corvid_abi_version** | `extern "C" fn() -> i32` | Returns `corvid_plugin_sdk::ABI_VERSION` cast to `i32` |
+| **__corvid_manifest** | `extern "C" fn() -> i32` | Serializes manifest to MessagePack, returns ptr to length-prefixed buffer |
+| **__corvid_invoke** | `extern "C" fn(tool_ptr: i32, tool_len: i32, input_ptr: i32, input_len: i32) -> i32` | Routes tool call by name, returns ptr to length-prefixed msgpack result |
+| **__corvid_on_event** | `extern "C" fn(event_ptr: i32, event_len: i32) -> i32` | Deserializes `PluginEvent`, calls `on_event()`, returns 0 on success or -1 on error |
+| **__corvid_shutdown** | `extern "C" fn()` | No-op shutdown hook — called before the WASM module is torn down |
+| **__corvid_alloc** | `extern "C" fn(size: i32) -> i32` | WASM memory allocator for host→plugin data transfer |
+| **__corvid_dealloc** | `extern "C" fn(ptr: i32, size: i32)` | WASM memory deallocator for cleanup |
 
 ### Return Value Encoding
 

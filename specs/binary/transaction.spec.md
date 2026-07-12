@@ -22,6 +22,7 @@ Builds, signs, and submits minimal Algorand payment transactions (0 ALGO with a 
 |----------|-----------|---------|-------------|
 | `send_note_transaction` | `algod: &impl AlgodClient`, `sender_address: &str`, `receiver_address: &str`, `note: &[u8]`, `signing_key: &SigningKey` | `anyhow::Result<String>` | Build, sign, and submit a 0-ALGO payment transaction with an encrypted note. Returns the transaction ID |
 | `decode_address` | `address: &str` | `anyhow::Result<[u8; 32]>` | Decode an Algorand address (base32 + 4-byte checksum) to 32 raw public key bytes |
+| `build_payment_transaction_with_amount` | payment transaction parameters | `anyhow::Result<Vec<u8>>` | Build a canonical payment transaction with an explicit amount |
 
 ### Internal Functions
 

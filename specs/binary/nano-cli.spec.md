@@ -39,6 +39,11 @@ Binary entry point for corvid-agent-nano. Parses CLI arguments, initializes cryp
 | `decode` | `s: &str` | `Result<Vec<u8>, DecodeError>` | Decode a base64 string to bytes |
 | `send_note_transaction` | `algod`, `sender`, `receiver`, `note`, `signing_key` | `Result<String>` | Build, sign, and submit a 0-ALGO payment transaction |
 | `decode_address` | `address: &str` | `Result<[u8; 32]>` | Decode Algorand address to 32 raw bytes |
+| `DiscoveredAgent` | — | struct | Agent discovered from on-chain registration records |
+| `ChainMessage` | — | struct | On-chain AlgoChat message representation |
+| `scan_all_algochat` | client parameters | async result | Scan the chain for AlgoChat messages |
+| `discover_agents` | client parameters | async result | Discover registered agents from chain state |
+| `build_payment_transaction_with_amount` | transaction parameters | encoded transaction | Build a payment transaction with an explicit amount |
 
 ### CLI Subcommands
 
