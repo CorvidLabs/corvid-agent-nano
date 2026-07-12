@@ -42,10 +42,7 @@
   "no_spec_change": false,
   "no_spec_change_rationale": null,
   "acceptance_criteria": [
-    "SpecSync strict check passes; all four agent integrations are installed; the immutable Trust 1.0.0 action runs as job trust; Rust formatting",
-    "clippy",
-    "workspace tests",
-    "and workspace builds remain green; standalone documentation Pages and Atlas publishing remain independent"
+    "SpecSync strict check passes; all four agent integrations are installed; the immutable Trust 1.0.0 action runs as job trust; Rust formatting, clippy, workspace tests, and workspace builds remain green; standalone documentation Pages and Atlas publishing remain independent"
   ],
   "selected_artifacts": [
     "context",
