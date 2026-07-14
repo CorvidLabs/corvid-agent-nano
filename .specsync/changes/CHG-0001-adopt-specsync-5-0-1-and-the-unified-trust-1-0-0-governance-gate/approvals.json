@@ -1,3 +1,33 @@
 {
-  "approvals": []
+  "approvals": [
+    {
+      "gate": "definition",
+      "actor": "user:0xLeif",
+      "timestamp": 1784014592,
+      "digest": "8bf86b248d1c43ea155b6f252ff110bcfc918d73306b60d033480e487c5cb80d",
+      "note": "Definition approved with seven concrete module requirements and mandatory complete coverage; hosted checks remain post-push evidence."
+    },
+    {
+      "gate": "definition",
+      "actor": "user:0xLeif",
+      "timestamp": 1784015815,
+      "digest": "3972f7abba57a592b1805b20f10fcd54a28fca94ebd1e8b86ff0027da5d89849",
+      "note": "Definition approval refreshed after adding explicit requirement-to-native-test evidence; no implementation semantics changed."
+    },
+    {
+      "gate": "definition",
+      "actor": "user:0xLeif",
+      "timestamp": 1784016069,
+      "digest": "3972f7abba57a592b1805b20f10fcd54a28fca94ebd1e8b86ff0027da5d89849",
+      "note": "Definition approval refreshed after expanding canonical source mappings and public API documentation to truthful 100% governed-file and export coverage."
+    },
+    {
+      "gate": "acceptance",
+      "actor": "user:0xLeif",
+      "timestamp": 1784016111,
+      "digest": "0572f5332a6e83a9ea0badf5587f2f6b57f432346a74bb906b4deb0b4e92c0c6",
+      "note": "Closing approval after full native format, lint, test, plugin E2E, and build verification; 49/49 governed files, 17,307/17,307 LOC, and every detected public export are documented with concrete stable requirements."
+    }
+  ],
+  "reopenings": []
 }

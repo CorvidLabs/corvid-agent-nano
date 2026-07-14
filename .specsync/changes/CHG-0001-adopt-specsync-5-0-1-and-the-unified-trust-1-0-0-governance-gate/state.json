@@ -5,10 +5,11 @@
   "title": "Adopt SpecSync 5.0.1 and the unified Trust 1.0.0 governance gate",
   "description": "Adopt SpecSync 5.0.1 and the unified Trust 1.0.0 governance gate",
   "kind": "migration",
-  "state": "draft",
+  "state": "accepted",
+  "canonical_applied": true,
   "base_commit": "9eb6a906bdb501c141a058b3d014d02fd32cfbad",
   "created_at": 1783887207,
-  "updated_at": 1783887217,
+  "updated_at": 1784016111,
   "affected_specs": [
     "nano-cli",
     "transaction",

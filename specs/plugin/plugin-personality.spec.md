@@ -1,6 +1,6 @@
 ---
 module: plugin-personality
-version: 1
+version: 2
 status: stable
 files:
   - plugins/personality/src/lib.rs
@@ -184,3 +184,4 @@ No input fields.
 | Date | Author | Change |
 |------|--------|--------|
 | 2026-04-18 | Jackdaw | Initial spec (spec-sync 4.x) — covers all four tools, KV storage layout, emotion detection, provider support |
+| 2026-07-14 | SpecSync | CHG-0001-adopt-specsync-5-0-1-and-the-unified-trust-1-0-0-governance-gate: Adopt SpecSync 5.0.1 and the unified Trust 1.0.0 governance gate |

@@ -1,8 +1,9 @@
 ---
 module: plugin-cli
-version: 1
+version: 3
 status: stable
 files:
+  - crates/corvid-plugin-cli/src/lib.rs
   - crates/corvid-plugin-cli/src/main.rs
   - crates/corvid-plugin-cli/src/scaffold.rs
   - crates/corvid-plugin-cli/src/validate.rs
@@ -41,6 +42,7 @@ Command-line tool for plugin authors and operators. Scaffolds new plugin project
 | `is_ok` | `&self` | `bool` | Report whether validation succeeded |
 | `error_count` | `&self` | `usize` | Count validation errors |
 | `validate_plugin_toml` | manifest path | `Result<ValidationReport>` | Validate a plugin manifest |
+| `validate` | module export | module | Expose the validation implementation to CLI and library consumers |
 
 ## Modules
 
@@ -204,3 +206,4 @@ CREATE TABLE plugins (
 | 2026-03-28 | CorvidAgent | Initial spec from council synthesis (Issue #15) |
 | 2026-04-06 | CorvidAgent | Updated to spec-sync v3.3.0 format — status: active → stable |
 | 2026-03-28 | CorvidAgent | v2: Implemented — scaffold, validate, install, list, uninstall subcommands |
+| 2026-07-14 | SpecSync | CHG-0001-adopt-specsync-5-0-1-and-the-unified-trust-1-0-0-governance-gate: Adopt SpecSync 5.0.1 and the unified Trust 1.0.0 governance gate |

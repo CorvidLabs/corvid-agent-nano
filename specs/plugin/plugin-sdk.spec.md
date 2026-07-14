@@ -1,6 +1,6 @@
 ---
 module: plugin-sdk
-version: 2
+version: 3
 status: stable
 files:
   - crates/corvid-plugin-sdk/src/lib.rs
@@ -260,3 +260,4 @@ None — this is a library crate with no runtime configuration.
 | 2026-04-06 | CorvidAgent | Updated to spec-sync v3.3.0 format — status: active → stable |
 | 2026-03-28 | CorvidAgent | Promoted to active — field types updated to match implementation (String/Vec vs static refs) |
 | 2026-04-06 | CorvidAgent | v2: Added `dependencies` field to PluginManifest for plugin dependency graph support |
+| 2026-07-14 | SpecSync | CHG-0001-adopt-specsync-5-0-1-and-the-unified-trust-1-0-0-governance-gate: Adopt SpecSync 5.0.1 and the unified Trust 1.0.0 governance gate |

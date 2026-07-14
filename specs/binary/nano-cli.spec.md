@@ -1,12 +1,21 @@
 ---
 module: nano-cli
-version: 8
+version: 10
 status: stable
 files:
   - src/main.rs
   - src/agent.rs
   - src/algorand.rs
   - src/transaction.rs
+  - src/a2a.rs
+  - src/algochat_transport.rs
+  - src/bridge.rs
+  - src/config.rs
+  - src/groups.rs
+  - src/mcp.rs
+  - src/sidecar.rs
+  - src/ui.rs
+  - src/wizard.rs
 depends_on:
   - specs/core/core.spec.md
   - specs/binary/transaction.spec.md
@@ -101,6 +110,94 @@ Binary entry point for corvid-agent-nano. Parses CLI arguments, initializes cryp
 | `src/algorand.rs` | `HttpAlgodClient` and `HttpIndexerClient` — HTTP adapters for rs-algochat traits |
 | `src/agent.rs` | `run_message_loop` — bidirectional message loop: receive, forward, poll, reply |
 | `src/transaction.rs` | Algorand transaction building, signing, and submission (see transaction.spec.md) |
+| `src/a2a.rs` | Local A2A HTTP routes, task storage, agent-card responses, and hub forwarding |
+| `src/algochat_transport.rs` | Runtime transport adapter between Nano messages and the AlgoChat protocol |
+| `src/bridge.rs` | Plugin-host bridge client and plugin discovery/invocation models |
+| `src/config.rs` | Persistent Nano configuration defaults, parsing, and serialization |
+| `src/groups.rs` | Persistent group membership and pre-shared-key management |
+| `src/mcp.rs` | MCP server transport and Nano tool dispatch |
+| `src/sidecar.rs` | Plugin-host sidecar discovery, launch, socket readiness, and shutdown |
+| `src/ui.rs` | Terminal output helpers used by interactive and non-interactive commands |
+| `src/wizard.rs` | First-run wallet import/generation and network-selection workflow |
+
+### Exported Supporting API
+
+| Export | Contract |
+|--------|----------|
+| `AgentCard` | Serializable A2A agent-card representation. |
+| `AgentCapabilities` | Capabilities advertised by the A2A endpoint. |
+| `AgentSkill` | One skill advertised in an agent card. |
+| `AgentAuth` | Authentication metadata advertised for the agent. |
+| `TaskState` | A2A task lifecycle state. |
+| `Task` | Stored A2A task and its current response state. |
+| `CreateTaskRequest` | Validated request body for A2A task creation. |
+| `TaskStore` | Capacity-bounded, identifier-addressable task storage. |
+| `insert` | Insert a task while enforcing store capacity. |
+| `get` | Read a task by identifier. |
+| `get_mut` | Mutably access a task while it is being advanced. |
+| `list` | Return stored tasks newest first. |
+| `A2aServerConfig` | Bind address, advertised identity, and optional hub forwarding configuration. |
+| `serve_a2a` | Serve the documented A2A routes until shutdown. |
+| `AlgoChatTransport` | Runtime transport adapter backed by AlgoChat and the configured signing identity. |
+| `PluginInfo` | Plugin metadata returned by the host bridge. |
+| `HealthStatus` | Typed plugin-host health response. |
+| `PluginBridge` | Unix-socket client for plugin lifecycle and invocation requests. |
+| `connect` | Connect a bridge client to the configured sidecar socket. |
+| `list_plugins` | Return the plugins currently reported by the host. |
+| `invoke` | Invoke a named tool on a loaded plugin. |
+| `load_plugin` | Request host validation and loading for a plugin artifact. |
+| `unload_plugin` | Request orderly unloading of a plugin. |
+| `health` | Query the sidecar health response. |
+| `NanoConfig` | Root persisted Nano configuration. |
+| `AgentConfig` | Agent identity and local behavior settings. |
+| `NetworkConfig` | Algod and indexer endpoint settings. |
+| `HubConfig` | Optional hub-forwarding settings. |
+| `RuntimeConfig` | Runtime polling and service settings. |
+| `PluginsConfig` | Plugin enablement and per-plugin configuration. |
+| `LoggingConfig` | Log format and level settings. |
+| `load` | Load configuration from the default location. |
+| `load_from` | Parse configuration from an explicit path. |
+| `save` | Persist configuration to the default location. |
+| `save_to` | Persist configuration to an explicit path. |
+| `plugin_config` | Resolve configuration for one plugin. |
+| `for_new_agent` | Construct the initial configuration for a validated agent identity. |
+| `Group` | Named group and its pre-shared-key metadata. |
+| `GroupMember` | Addressed member of a group. |
+| `GroupStore` | Persistent group and membership storage. |
+| `open` | Open the persistent group database. |
+| `in_memory` | Open an isolated in-memory group store. |
+| `create` | Create a group with a generated key. |
+| `create_with_psk` | Create a group using validated supplied key material. |
+| `remove` | Remove a group and its memberships. |
+| `add_member` | Add a non-duplicate member to an existing group. |
+| `remove_member` | Remove a member from an existing group. |
+| `members` | List the members of a group. |
+| `count` | Count stored groups. |
+| `export_json` | Serialize group data in the documented exchange format. |
+| `import_json` | Validate and import group exchange data. |
+| `serve_health` | Serve the lightweight Nano health endpoint. |
+| `cmd_mcp` | Start the MCP command transport and dispatch Nano tools. |
+| `SidecarConfig` | Plugin-host binary, data-directory, socket, and startup settings. |
+| `SidecarHandle` | Owned child-process handle for the running host. |
+| `shutdown` | Stop the owned sidecar process cleanly. |
+| `socket_path` | Derive the plugin-host socket path from its data directory. |
+| `find_plugin_host_binary` | Resolve an executable plugin-host binary from supported locations. |
+| `spawn_sidecar` | Launch the plugin host with the configured arguments. |
+| `wait_for_socket` | Wait up to the startup deadline for socket readiness. |
+| `header` | Render a CLI section heading. |
+| `success` | Render a successful CLI result. |
+| `error` | Render a CLI error. |
+| `warn` | Render a CLI warning. |
+| `field` | Render a labeled CLI field. |
+| `separator` | Render a terminal separator. |
+| `table_header` | Render a terminal table heading. |
+| `banner` | Render the Nano startup banner. |
+| `dir_arrow` | Render the directional marker used in message views. |
+| `balance` | Render an ALGO balance consistently. |
+| `WizardConfig` | Non-interactive and interactive setup inputs. |
+| `WizardResult` | Validated identity and network result from setup. |
+| `run_wizard` | Generate or import a wallet and select its network settings. |
+| `check_first_run` | Detect whether first-run setup is required. |
 
 ### algorand.rs — HTTP Trait Implementations
 
@@ -274,3 +371,4 @@ None — this is the binary entry point.
 | 2026-03-28 | CorvidAgent | v5: Add Exported Structs/Functions sections for spec-sync strict compliance |
 | 2026-03-28 | CorvidAgent | v6: Bidirectional messaging — hub response polling, encrypted on-chain replies, PSK/X25519 encryption, transaction building |
 | 2026-04-06 | CorvidAgent | v7→8: Update CLI subcommands table to reflect all 16 commands (balance, history, fund, register, mcp, plugin added) |
+| 2026-07-14 | SpecSync | CHG-0001-adopt-specsync-5-0-1-and-the-unified-trust-1-0-0-governance-gate: Adopt SpecSync 5.0.1 and the unified Trust 1.0.0 governance gate |

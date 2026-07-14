@@ -9,4 +9,5 @@ artifact: tasks
 - [x] Stamp SpecSync 5.0.1 and install Claude, Cursor, Codex, and Gemini integrations.
 - [x] Add Trust, Augur, and Attest policy configuration.
 - [x] Preserve Rust matrices and independent documentation Pages/Atlas.
-- [ ] Record local and hosted verification evidence.
+- [x] Configure the native verification lane and SpecSync lifecycle so fresh local evidence can be recorded.
+- [x] Preserve hosted Trust and existing CI as post-push checks without claiming their result in advance.

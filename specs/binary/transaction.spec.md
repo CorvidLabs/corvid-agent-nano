@@ -1,6 +1,6 @@
 ---
 module: transaction
-version: 1
+version: 2
 status: stable
 files:
   - src/transaction.rs
@@ -125,3 +125,4 @@ Algorand addresses are 58-character base32 strings encoding 36 bytes:
 | Date | Author | Change |
 |------|--------|--------|
 | 2026-03-28 | CorvidAgent | Initial spec — transaction building, signing, and address encoding |
+| 2026-07-14 | SpecSync | CHG-0001-adopt-specsync-5-0-1-and-the-unified-trust-1-0-0-governance-gate: Adopt SpecSync 5.0.1 and the unified Trust 1.0.0 governance gate |

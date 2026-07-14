@@ -5,4 +5,6 @@ artifact: research
 
 # Research
 
-Strict SpecSync validation exposed companion inventory drift and an empty personality-plugin file mapping. Those documentation-only mismatches are corrected without changing Rust APIs. No coverage threshold was committed previously, so adoption begins at advisory 0 while strict consistency remains mandatory.
+Strict SpecSync validation exposed companion inventory drift and an empty personality-plugin file mapping. Those
+documentation-only mismatches are corrected without changing Rust APIs. This migration records stable requirements
+for every affected canonical module and must enforce complete file and LOC coverage before closing approval.

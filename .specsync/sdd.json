@@ -29,11 +29,23 @@
     "crates/corvid-plugin-cli/src/",
     "crates/corvid-plugin-host/src/",
     "crates/corvid-plugin-macros/src/",
-    "crates/corvid-plugin-sdk/src/"
+    "crates/corvid-plugin-sdk/src/",
+    "plugins/",
+    "specs/",
+    "fledge.toml",
+    ".trust.toml",
+    ".augur.toml",
+    ".attest.json",
+    "AGENTS.md",
+    ".claude/",
+    ".codex/",
+    ".cursor/",
+    ".gemini/"
   ],
   "ignored_paths": [
-    ".specsync/",
-    "specs/"
+    ".specsync/changes/",
+    ".specsync/hashes.json",
+    ".specsync/change.lock"
   ],
   "verification_commands": [
     "fledge lanes run verify"
