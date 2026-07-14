@@ -1,0 +1,24 @@
+{
+  "timestamp": 1784016096,
+  "commit": "38c0adff05d33123fdc761cbbf3bdaadb0b9576b",
+  "contract_digest": "3972f7abba57a592b1805b20f10fcd54a28fca94ebd1e8b86ff0027da5d89849",
+  "workspace_digest": "78b22158f0300dddb402faece850cd8f9ddb556aa7c3f6916eb7e2aeb75d7612",
+  "acceptance_input_digest": "3453028d81a7fdafa8558246a3e0029adda1ac21f12045bfc53b97446560ecde",
+  "passed": true,
+  "commands": [
+    {
+      "command": "fledge lanes run verify",
+      "success": true,
+      "exit_code": 0
+    }
+  ],
+  "requirement_ids": [
+    "REQ-nano-cli-001",
+    "REQ-plugin-cli-001",
+    "REQ-plugin-host-001",
+    "REQ-plugin-macros-001",
+    "REQ-plugin-personality-001",
+    "REQ-plugin-sdk-001",
+    "REQ-transaction-001"
+  ]
+}

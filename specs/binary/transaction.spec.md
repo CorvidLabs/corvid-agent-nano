@@ -1,6 +1,6 @@
 ---
 module: transaction
-version: 1
+version: 2
 status: stable
 files:
   - src/transaction.rs
@@ -22,6 +22,7 @@ Builds, signs, and submits minimal Algorand payment transactions (0 ALGO with a 
 |----------|-----------|---------|-------------|
 | `send_note_transaction` | `algod: &impl AlgodClient`, `sender_address: &str`, `receiver_address: &str`, `note: &[u8]`, `signing_key: &SigningKey` | `anyhow::Result<String>` | Build, sign, and submit a 0-ALGO payment transaction with an encrypted note. Returns the transaction ID |
 | `decode_address` | `address: &str` | `anyhow::Result<[u8; 32]>` | Decode an Algorand address (base32 + 4-byte checksum) to 32 raw public key bytes |
+| `build_payment_transaction_with_amount` | payment transaction parameters | `anyhow::Result<Vec<u8>>` | Build a canonical payment transaction with an explicit amount |
 
 ### Internal Functions
 
@@ -124,3 +125,4 @@ Algorand addresses are 58-character base32 strings encoding 36 bytes:
 | Date | Author | Change |
 |------|--------|--------|
 | 2026-03-28 | CorvidAgent | Initial spec — transaction building, signing, and address encoding |
+| 2026-07-14 | SpecSync | CHG-0001-adopt-specsync-5-0-1-and-the-unified-trust-1-0-0-governance-gate: Adopt SpecSync 5.0.1 and the unified Trust 1.0.0 governance gate |

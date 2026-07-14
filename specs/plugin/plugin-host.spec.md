@@ -1,8 +1,9 @@
 ---
 module: plugin-host
-version: 3
+version: 5
 status: stable
 files:
+  - crates/corvid-plugin-host/src/lib.rs
   - crates/corvid-plugin-host/src/main.rs
   - crates/corvid-plugin-host/src/engine.rs
   - crates/corvid-plugin-host/src/loader.rs
@@ -16,6 +17,9 @@ files:
   - crates/corvid-plugin-host/src/host_functions/http.rs
   - crates/corvid-plugin-host/src/host_functions/db.rs
   - crates/corvid-plugin-host/src/host_functions/fs.rs
+  - crates/corvid-plugin-host/src/host_functions/llm.rs
+  - crates/corvid-plugin-host/src/host_functions/tts.rs
+  - crates/corvid-plugin-host/src/host_functions/mod.rs
   - crates/corvid-plugin-host/src/wasm_mem.rs
   - crates/corvid-plugin-host/src/invoke.rs
 depends_on:
@@ -76,6 +80,10 @@ The Rust sidecar binary that hosts WASM plugins for corvid-agent. Runs as a sepa
 | `MessagingBackend` | `host_functions/messaging.rs` | Pluggable agent message dispatch backend |
 | `DbBackend` | `host_functions/db.rs` | Pluggable read-only database query backend |
 | `FsBackend` | `host_functions/fs.rs` | Pluggable sandboxed filesystem read backend |
+| `LlmProvider` | `host_functions/llm.rs` | Supported host-managed LLM provider selection |
+| `LlmBackend` | `host_functions/llm.rs` | Provider, endpoint, model, and credential configuration for host LLM calls |
+| `TtsBackendKind` | `host_functions/tts.rs` | Supported host text-to-speech backend selection |
+| `TtsBackend` | `host_functions/tts.rs` | Host text-to-speech configuration and execution backend |
 | `PluginRegistry` | `registry.rs` | Centralized registry managing all loaded plugins |
 | `PluginState` | `registry.rs` | State enum for plugin lifecycle (ACTIVE, DRAINING, UNLOADED) |
 | `ToolInfo` | `invoke.rs` | Tool metadata: name, description, input schema |
@@ -111,6 +119,56 @@ The Rust sidecar binary that hosts WASM plugins for corvid-agent. Runs as a sepa
 | `read_str` | `wasm_mem.rs` | `store`, `ptr`, `len` | `Result<String>` | Read string from WASM memory |
 | `write_response` | `wasm_mem.rs` | `store`, `data` | `Result<(i32, i32)>` | Write response to WASM memory |
 | `set` | `host_functions/storage.rs` | `backend`, `key`, `value` | async `Result<()>` | Set KV pair in storage |
+| `new` | `registry.rs` | registry parameters | `Self` | Construct a registry or state value |
+| `is_active` | `registry.rs` | `&self` | `bool` | Test whether a plugin is active |
+| `is_draining` | `registry.rs` | `&self` | `bool` | Test whether a plugin is draining |
+| `try_acquire` | `registry.rs` | `&self` | guard result | Acquire an active plugin invocation guard |
+| `drain_and_reload` | `registry.rs` | plugin parameters | async result | Drain active calls and reload a plugin |
+| `unload` | `registry.rs` | plugin id | result | Unload a registered plugin |
+| `state_str` | `registry.rs` | `&self` | `&str` | Return the lifecycle state name |
+| `register` | `registry.rs` | loaded plugin | result | Register a loaded plugin |
+| `get` | `registry.rs` | plugin id | plugin result | Resolve a registered plugin |
+| `reload` | `registry.rs` | plugin parameters | async result | Reload a registered plugin |
+| `list_manifests` | `registry.rs` | `&self` | manifest list | List registered plugin manifests |
+| `health_status` | `registry.rs` | `&self` | health data | Report registry health |
+| `len` | `registry.rs` | `&self` | `usize` | Count registered plugins |
+| `is_empty` | `registry.rs` | `&self` | `bool` | Test whether the registry is empty |
+| `check_dependencies` | `registry.rs` | manifests | result | Validate plugin dependencies |
+| `topological_order` | `registry.rs` | manifests | ordered result | Order plugins by dependency |
+| `dispatch_event_counted` | `executor.rs` | registry, event | async count | Dispatch an event and return delivery count |
+| `DbQuery` | `host_functions/db.rs` | — | struct | Read-only database query request |
+| `is_select_only` | `host_functions/db.rs` | SQL | `bool` | Validate a read-only query |
+| `FsRead` | `host_functions/fs.rs` | — | struct | Filesystem read request |
+| `ProjectDirFs` | `host_functions/fs.rs` | — | struct | Project-directory filesystem backend |
+| `validate_path` | `host_functions/fs.rs` | path | result | Validate sandboxed filesystem paths |
+| `from_config` | `host_functions/llm.rs` | explicit configuration | `Result<LlmBackend>` | Construct a validated LLM backend from explicit settings |
+| `from_env` | `host_functions/llm.rs` | environment | `Result<LlmBackend>` | Construct a validated LLM backend from host-managed environment settings |
+| `chat` | `host_functions/llm.rs` | chat request | async result | Send a chat request through the configured provider |
+| `list_voices` | `host_functions/tts.rs` | `&self` | voice list | Return the voices exposed by the configured TTS backend |
+| `speak` | `host_functions/tts.rs` | text and voice options | audio result | Synthesize speech through the configured TTS backend |
+| `link_host_functions` | `host_functions/mod.rs` | linker and invocation context | result | Link the host functions authorized for an invocation context |
+
+### Public Module Exports
+
+| Export | Contract |
+|--------|----------|
+| `discovery` | Plugin artifact discovery and watch support. |
+| `engine` | Wasmtime engine construction and cache configuration. |
+| `executor` | Event dispatch execution. |
+| `host_functions` | Capability-scoped host-function linkage. |
+| `invoke` | Plugin tool invocation and response handling. |
+| `loader` | Manifest extraction, validation, signature verification, and loading. |
+| `registry` | Plugin registration, dependency ordering, health, and reload lifecycle. |
+| `sandbox` | Trust-tier resource limits and URL policy. |
+| `wasm_mem` | Checked guest-memory reads and response writes. |
+| `algo` | Algorand read host functions. |
+| `db` | Read-only database host functions. |
+| `fs` | Project-directory filesystem host functions. |
+| `http` | Allowlisted outbound HTTP host functions. |
+| `llm` | Host-managed LLM chat functions. |
+| `messaging` | Agent-message dispatch host functions. |
+| `storage` | Namespaced plugin storage host functions. |
+| `tts` | Host-managed text-to-speech functions. |
 
 ### Struct Methods
 
@@ -391,3 +449,4 @@ Host function linking is implemented — capabilities are gated at instantiation
 | 2026-03-28 | CorvidAgent | Phase B data plane: `host_algo_state` with pluggable `AlgoBackend`, `host_send_message` with `MessagingBackend` + target_filter enforcement, `plugin.invoke` RPC via `__corvid_invoke` WASM export, `plugin.event` RPC via `__corvid_on_event`, `invoke.rs` execution module |
 | 2026-04-06 | CorvidAgent | v2: Implemented `host_db_query` (SELECT-only SQL with pluggable `DbBackend`), `host_fs_read` (sandboxed file read with `FsBackend` + path traversal protection), plugin dependency graph (topological sort, cycle detection, dependency checking at registration) |
 | 2026-04-18 | Jackdaw | v3 (spec-sync 4.x): Added `HttpPostRequest` struct — `host_http_post` now accepts msgpack `HttpPostRequest { headers, body }` to allow plugins to supply custom HTTP headers; falls back to treating body as raw bytes for backward compatibility |
+| 2026-07-14 | SpecSync | CHG-0001-adopt-specsync-5-0-1-and-the-unified-trust-1-0-0-governance-gate: Adopt SpecSync 5.0.1 and the unified Trust 1.0.0 governance gate |

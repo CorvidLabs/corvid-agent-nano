@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "id": "CHG-0002-complete-governance-integration-coverage-for-the-specsync-5-and-trust-1-migratio",
+  "slug": "complete-governance-integration-coverage-for-the-specsync-5-and-trust-1-migratio",
+  "title": "Complete governance integration coverage for the SpecSync 5 and Trust 1 migration",
+  "description": "Complete governance integration coverage for the SpecSync 5 and Trust 1 migration",
+  "kind": "migration",
+  "state": "accepted",
+  "base_commit": "391e2b9da9926404d556d78bc82c6a3d91fc85d7",
+  "created_at": 1784016247,
+  "updated_at": 1784016816,
+  "affected_specs": [],
+  "affected_paths": [
+    ".attest.json",
+    ".augur.toml",
+    ".trust.toml",
+    "AGENTS.md",
+    ".claude/",
+    ".codex/",
+    ".cursor/",
+    ".gemini/"
+  ],
+  "no_spec_change": true,
+  "no_spec_change_rationale": "These paths configure CI policy and editor or agent integrations; they do not change Nano product behavior or any canonical product contract.",
+  "acceptance_criteria": [
+    "Released SpecSync 5.0.1 strict forced validation reports 49/49 files and 17307/17307 LOC governed; all four agent integrations are installed; fledge trust doctor and fledge trust verify pass; the exact pushed head passes hosted Trust and existing CodeQL checks."
+  ],
+  "selected_artifacts": [
+    "context",
+    "research",
+    "design",
+    "plan",
+    "tasks",
+    "testing",
+    "docs"
+  ],
+  "dependencies": [],
+  "answers": {
+    "architecture_risk": "yes",
+    "public_contract": "no"
+  }
+}

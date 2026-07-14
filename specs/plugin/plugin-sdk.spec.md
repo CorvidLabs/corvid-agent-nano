@@ -1,6 +1,6 @@
 ---
 module: plugin-sdk
-version: 2
+version: 3
 status: stable
 files:
   - crates/corvid-plugin-sdk/src/lib.rs
@@ -49,6 +49,17 @@ This crate is the **semver stability boundary**. Breaking changes bump `ABI_VERS
 | `host_fs_read` | `extern "C" fn(path_ptr: i32, path_len: i32) -> i32` | Sandboxed file read (WASM import) |
 | `host_algo_state` | `extern "C" fn(account_ptr: i32, account_len: i32) -> i32` | Algorand account state read (WASM import) |
 | `host_send_message` | `extern "C" fn(target_ptr: i32, target_len: i32, msg_ptr: i32, msg_len: i32) -> i32` | Send agent message (WASM import) |
+| `ToolInfo` | data type | Tool metadata exposed by the SDK |
+| `LlmMessage` | data type | A message in an LLM conversation |
+| `LlmRequest` | data type | Host LLM request payload |
+| `LlmResponse` | data type | Host LLM response payload |
+| `LlmService` | service trait | Host-provided LLM service |
+| `TtsRequest` | data type | Host text-to-speech request payload |
+| `TtsResponse` | data type | Host text-to-speech response payload |
+| `TtsService` | service trait | Host-provided text-to-speech service |
+| `host_llm_chat` | host import | Send an LLM chat request through the host |
+| `host_tts_speak` | host import | Synthesize speech through the host |
+| `host_tts_list_voices` | host import | List host text-to-speech voices |
 
 ### Exported Constants
 
@@ -249,3 +260,4 @@ None — this is a library crate with no runtime configuration.
 | 2026-04-06 | CorvidAgent | Updated to spec-sync v3.3.0 format — status: active → stable |
 | 2026-03-28 | CorvidAgent | Promoted to active — field types updated to match implementation (String/Vec vs static refs) |
 | 2026-04-06 | CorvidAgent | v2: Added `dependencies` field to PluginManifest for plugin dependency graph support |
+| 2026-07-14 | SpecSync | CHG-0001-adopt-specsync-5-0-1-and-the-unified-trust-1-0-0-governance-gate: Adopt SpecSync 5.0.1 and the unified Trust 1.0.0 governance gate |
