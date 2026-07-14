@@ -1,6 +1,6 @@
 ---
 id: CHG-0002-complete-governance-integration-coverage-for-the-specsync-5-and-trust-1-migratio
-state: verifying
+state: accepted
 type: migration
 base_commit: 391e2b9da9926404d556d78bc82c6a3d91fc85d7
 ---

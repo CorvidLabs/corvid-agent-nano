@@ -13,6 +13,13 @@
       "timestamp": 1784016415,
       "digest": "6d5092de55659320d5ac40caa0c0cce97664a8f248348f678cd9f4072359619e",
       "note": "Definition approval refreshed after removing ambiguous generated wording; scope and behavior are unchanged."
+    },
+    {
+      "gate": "acceptance",
+      "actor": "user:0xLeif",
+      "timestamp": 1784016816,
+      "digest": "e13b0e81afeff7fa43a9642b902296ef649669212bfc9c58fee9e704b8bd000d",
+      "note": "Closing approval after released SpecSync 5.0.1 strict 100% validation, all four integrations, local Trust verification, and exact verifying head 4bdfc511b0d10dc28dac73598ecbee91eb3c2839 passing hosted Trust and all CodeQL checks."
     }
   ]
 }
