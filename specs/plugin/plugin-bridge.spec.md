@@ -34,12 +34,6 @@ This is the **only TypeScript code** needed to integrate the entire Rust plugin 
 |-------|------|-------------|
 | `PluginBridge` | `rust-bridge.ts` | Unix socket client — JSON-RPC dispatch, tool invocation, event forwarding |
 
-### Exported Functions
-
-| Function | File | Parameters | Returns | Description |
-|----------|------|-----------|---------|-------------|
-| `registerPluginRoutes` | `plugins.ts` | `(app: BunServe, bridge: PluginBridge)` | `void` | Register `/api/plugins` and tool invocation REST endpoints |
-
 ### PluginBridge Methods
 
 | Method | Parameters | Returns | Description |

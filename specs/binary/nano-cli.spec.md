@@ -4,9 +4,7 @@ version: 10
 status: stable
 files:
   - src/main.rs
-  - src/agent.rs
   - src/algorand.rs
-  - src/transaction.rs
   - src/a2a.rs
   - src/algochat_transport.rs
   - src/bridge.rs
@@ -34,7 +32,6 @@ Binary entry point for corvid-agent-nano. Parses CLI arguments, initializes cryp
 
 | Struct | Description |
 |--------|-------------|
-| `AgentLoopConfig` | Configuration for the message loop: poll interval, hub URL, agent name, agent address, signing key |
 | `HttpAlgodClient` | HTTP adapter implementing `algochat::AlgodClient` for algod v2 REST API |
 | `HttpIndexerClient` | HTTP adapter implementing `algochat::IndexerClient` for indexer v2 REST API |
 
@@ -42,17 +39,12 @@ Binary entry point for corvid-agent-nano. Parses CLI arguments, initializes cryp
 
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
-| `run_message_loop` | `Arc<AlgoChat<...>>`, `Arc<AlgodClient>`, `AgentLoopConfig` | `!` | Infinite loop: sync → forward to hub → poll response → encrypt reply → send on-chain → sleep → repeat |
-| `send_reply` | `algod`, `message_id`, `response`, `config` | async | Sends an encrypted reply message back on-chain after hub processing |
 | `new` | `base_url: &str`, `token: &str` | `Self` | Constructor for `HttpAlgodClient` and `HttpIndexerClient` |
 | `decode` | `s: &str` | `Result<Vec<u8>, DecodeError>` | Decode a base64 string to bytes |
-| `send_note_transaction` | `algod`, `sender`, `receiver`, `note`, `signing_key` | `Result<String>` | Build, sign, and submit a 0-ALGO payment transaction |
-| `decode_address` | `address: &str` | `Result<[u8; 32]>` | Decode Algorand address to 32 raw bytes |
 | `DiscoveredAgent` | — | struct | Agent discovered from on-chain registration records |
 | `ChainMessage` | — | struct | On-chain AlgoChat message representation |
 | `scan_all_algochat` | client parameters | async result | Scan the chain for AlgoChat messages |
 | `discover_agents` | client parameters | async result | Discover registered agents from chain state |
-| `build_payment_transaction_with_amount` | transaction parameters | encoded transaction | Build a payment transaction with an explicit amount |
 
 ### CLI Subcommands
 
